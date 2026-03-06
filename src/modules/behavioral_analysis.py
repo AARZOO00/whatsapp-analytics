@@ -1,7 +1,11 @@
 import pandas as pd
 import numpy as np
-from transformers import pipeline
 import warnings
+try:
+    from transformers import pipeline
+    _TRANSFORMERS_OK = True
+except ImportError:
+    _TRANSFORMERS_OK = False
 
 warnings.filterwarnings('ignore')
 
@@ -13,6 +17,8 @@ class BehavioralAnalyzer:
 
     def __init__(self):
         try:
+            if not _TRANSFORMERS_OK:
+                raise ImportError("transformers not available")
             self.toxicity_pipeline = pipeline(
                 "text-classification",
                 model="michellejieli/TOXIC_BERT"
