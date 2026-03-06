@@ -1,5 +1,12 @@
 import pandas as pd
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+    pipeline = None
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
 import warnings
 
 warnings.filterwarnings('ignore')

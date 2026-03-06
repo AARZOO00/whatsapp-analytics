@@ -1,6 +1,14 @@
 import pandas as pd
 import numpy as np
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+    pipeline = None
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -11,22 +19,15 @@ class SentimentAnalyzer:
     """
 
     def __init__(self):
-        self.vader_analyzer        = SentimentIntensityAnalyzer()
-        self._transformer_pipeline = None   # lazy loaded
-        self.transformer_available = False
-
-    def _load_transformer(self):
-        """Load transformer only when explicitly needed."""
-        if self._transformer_pipeline is not None:
-            return
+        self.vader_analyzer = SentimentIntensityAnalyzer()
         try:
-            self._transformer_pipeline = pipeline(
+            self.transformer_pipeline = pipeline(
                 "sentiment-analysis",
-                model="distilbert-base-uncased-finetuned-sst-2-english",
+                model="distilbert-base-uncased-finetuned-sst-2-english"
             )
             self.transformer_available = True
         except Exception as e:
-            print(f"Transformer not available: {e}")
+            print(f"Warning: Transformer model not available: {e}")
             self.transformer_available = False
 
     def analyze_vader(self, text: str) -> dict:
@@ -62,12 +63,20 @@ class SentimentAnalyzer:
         }
 
     def analyze_transformer(self, text: str) -> dict:
-        """Transformer-based sentiment — lazy loaded on first call."""
-        self._load_transformer()
+        """
+        Transformer-based sentiment analysis.
+
+        Args:
+            text: Input text
+
+        Returns:
+            Dict with sentiment and score
+        """
         if not self.transformer_available or not text or not isinstance(text, str):
             return {'label': 'NEUTRAL', 'score': 0.5}
+
         try:
-            result = self._transformer_pipeline(text[:512])[0]
+            result = self.transformer_pipeline(text[:512])[0]
             label = 'POSITIVE' if result['label'] == 'POSITIVE' else 'NEGATIVE'
             score = result['score']
 
@@ -89,20 +98,15 @@ class SentimentAnalyzer:
         """
         df = df.copy()
 
-        # Run VADER once per row (5x faster than calling 5 separate apply)
-        vader_results = df['message_cleaned'].apply(self.analyze_vader)
-        df['sentiment_vader']    = vader_results.apply(lambda x: x['label'])
-        df['sentiment_compound'] = vader_results.apply(lambda x: x['compound'])
-        df['sentiment_pos']      = vader_results.apply(lambda x: x['positive'])
-        df['sentiment_neg']      = vader_results.apply(lambda x: x['negative'])
-        df['sentiment_neu']      = vader_results.apply(lambda x: x['neutral'])
+        df['sentiment_vader'] = df['message_cleaned'].apply(lambda x: self.analyze_vader(x)['label'])
+        df['sentiment_compound'] = df['message_cleaned'].apply(lambda x: self.analyze_vader(x)['compound'])
+        df['sentiment_pos'] = df['message_cleaned'].apply(lambda x: self.analyze_vader(x)['positive'])
+        df['sentiment_neg'] = df['message_cleaned'].apply(lambda x: self.analyze_vader(x)['negative'])
+        df['sentiment_neu'] = df['message_cleaned'].apply(lambda x: self.analyze_vader(x)['neutral'])
 
-        if use_transformer:
-            self._load_transformer()
-            if self.transformer_available:
-                tr = df['message_cleaned'].apply(self.analyze_transformer)
-                df['sentiment_transformer']       = tr.apply(lambda x: x['label'])
-                df['sentiment_transformer_score'] = tr.apply(lambda x: x['score'])
+        if use_transformer and self.transformer_available:
+            df['sentiment_transformer'] = df['message_cleaned'].apply(lambda x: self.analyze_transformer(x)['label'])
+            df['sentiment_transformer_score'] = df['message_cleaned'].apply(lambda x: self.analyze_transformer(x)['score'])
 
         return df
 

@@ -1,11 +1,14 @@
 import pandas as pd
 import numpy as np
-import warnings
 try:
-    from transformers import pipeline
-    _TRANSFORMERS_OK = True
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    _HAS_TRANSFORMERS = True
 except ImportError:
-    _TRANSFORMERS_OK = False
+    _HAS_TRANSFORMERS = False
+    pipeline = None
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
+import warnings
 
 warnings.filterwarnings('ignore')
 
@@ -17,8 +20,6 @@ class BehavioralAnalyzer:
 
     def __init__(self):
         try:
-            if not _TRANSFORMERS_OK:
-                raise ImportError("transformers not available")
             self.toxicity_pipeline = pipeline(
                 "text-classification",
                 model="michellejieli/TOXIC_BERT"

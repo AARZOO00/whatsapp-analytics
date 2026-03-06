@@ -1,109 +1,139 @@
-"""
-emotion_detector.py — Optimized: instant rule-based detection (no heavy ML model on startup)
-Transformer available as opt-in upgrade only.
-"""
 import pandas as pd
 import numpy as np
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+    pipeline = None
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
 import warnings
+
 warnings.filterwarnings('ignore')
-
-# ── Keyword map for instant rule-based emotion detection ─────────────────
-_EMOTION_KEYWORDS = {'joy': ['haha', 'lol', '😂', '😄', '😁', '😊', '🎉', 'happy', 'great', 'love', 'yay', 'awesome', 'amazing', 'wonderful', 'fantastic', 'congrats', '😍', '❤️', '🥳', 'khush', 'maza', 'maja', 'bahut acha', 'excellent', 'brilliant', 'superb'], 'anger': ['angry', 'hate', 'stupid', 'idiot', 'wtf', 'damn', 'ugh', '😠', '😡', '🤬', 'frustrated', 'annoyed', 'irritated', 'horrible', 'worst', 'terrible', 'bakwaas', 'bekar', 'galat', 'ganda', 'bura'], 'sadness': ['sad', 'miss', 'lonely', 'cry', '😢', '😭', '💔', 'depressed', 'unhappy', 'sorry', 'regret', 'wish', 'disappointed', 'hurt', 'dukh', 'udaas', 'afsos'], 'fear': ['scared', 'afraid', 'fear', 'worry', 'anxious', 'nervous', '😨', '😱', 'panic', 'frightened', 'stress', 'tense', 'darr', 'ghabra', 'tension', 'pareshan'], 'surprise': ['wow', 'omg', 'oh my', 'really', 'seriously', '😲', '😮', 'shocking', 'unexpected', 'unbelievable', 'whoa', 'arre', 'yaar sach', 'kya baat'], 'disgust': ['disgusting', 'gross', 'yuck', 'eww', '🤮', '🤢', 'horrible', 'nasty', 'awful', 'sick', 'ghatiya', 'chee']}
-
-def _rule_based_emotion(text: str) -> str:
-    """Zero-latency keyword emotion detection."""
-    if not text or not isinstance(text, str):
-        return 'neutral'
-    t = text.lower()
-    scores = {em: sum(1 for kw in kws if kw in t)
-              for em, kws in _EMOTION_KEYWORDS.items()}
-    best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else 'neutral'
-
 
 class EmotionDetector:
     """
-    Fast emotion detection using rule-based keywords.
-    ML transformer available as opt-in (lazy loaded).
+    Detect emotions in WhatsApp messages.
+    Emotions: Joy, Anger, Sadness, Fear, Surprise, Disgust
     """
 
     def __init__(self):
-        self._pipeline = None
-        self.available = False   # transformer availability
-
-    def _load_transformer(self):
-        """Load heavy ML model only when explicitly requested."""
-        if self._pipeline is not None:
-            return
         try:
-            from transformers import pipeline
-            self._pipeline = pipeline(
+            self.emotion_pipeline = pipeline(
                 "text-classification",
-                model="j-hartmann/emotion-english-distilroberta-base",
+                model="j-hartmann/emotion-english-distilroberta-base"
             )
             self.available = True
         except Exception as e:
-            print(f"Emotion transformer not available: {e}")
+            print(f"Warning: Emotion model not available: {e}")
             self.available = False
 
     def detect_emotion(self, text: str) -> dict:
-        """Fast rule-based emotion (default)."""
-        return {'emotion': _rule_based_emotion(text), 'score': 1.0}
+        """
+        Detect emotion in text.
 
-    def detect_emotion_ml(self, text: str) -> dict:
-        """ML-based emotion — loads transformer on first call."""
-        self._load_transformer()
-        if not self.available or not text:
-            return self.detect_emotion(text)
+        Args:
+            text: Input text
+
+        Returns:
+            Dict with emotion label and score
+        """
+        if not self.available or not text or not isinstance(text, str):
+            return {'emotion': 'neutral', 'score': 0.5}
+
         try:
-            result = self._pipeline(text[:512])[0]
-            return {'emotion': result['label'].lower(), 'score': round(result['score'], 3)}
-        except Exception:
-            return self.detect_emotion(text)
+            result = self.emotion_pipeline(text[:512])[0]
+            return {
+                'emotion': result['label'].lower(),
+                'score': round(result['score'], 3)
+            }
+        except Exception as e:
+            print(f"Warning: Emotion detection failed: {e}")
+            return {'emotion': 'neutral', 'score': 0.5}
 
     def analyze_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Analyze full DataFrame — uses fast rule-based by default."""
+        """
+        Analyze emotions for entire dataframe.
+
+        Args:
+            df: DataFrame with cleaned messages
+
+        Returns:
+            DataFrame with emotion columns added
+        """
         df = df.copy()
-        results = df['message_cleaned'].apply(self.detect_emotion)
-        df['emotion']       = results.apply(lambda x: x['emotion'])
-        df['emotion_score'] = results.apply(lambda x: x['score'])
+
+        emotions = df['message_cleaned'].apply(lambda x: self.detect_emotion(x))
+
+        df['emotion'] = emotions.apply(lambda x: x['emotion'])
+        df['emotion_score'] = emotions.apply(lambda x: x['score'])
+
         return df
 
     def get_emotion_distribution(self, df: pd.DataFrame) -> dict:
+        """Get emotion counts and percentages"""
         if 'emotion' not in df.columns:
             return {}
+
         counts = df['emotion'].value_counts()
-        total  = max(len(df), 1)
-        return {
-            em.upper(): {
-                'count': int(counts.get(em, 0)),
-                'percentage': round(counts.get(em, 0) / total * 100, 2),
+        total = len(df)
+
+        result = {}
+        for emotion in ['joy', 'anger', 'sadness', 'fear', 'surprise', 'disgust', 'neutral']:
+            count = counts.get(emotion, 0)
+            result[emotion.upper()] = {
+                'count': count,
+                'percentage': round((count / total) * 100, 2) if total > 0 else 0
             }
-            for em in ['joy', 'anger', 'sadness', 'fear', 'surprise', 'disgust', 'neutral']
-        }
+
+        return result
 
     def get_user_emotion(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Get average emotion per user"""
         if 'emotion' not in df.columns:
             return pd.DataFrame()
-        ue  = df.groupby(['user', 'emotion']).size().unstack(fill_value=0)
-        return (ue.div(ue.sum(axis=1), axis=0) * 100).round(2)
+
+        user_emotions = df.groupby(['user', 'emotion']).size().unstack(fill_value=0)
+
+        user_emotions_pct = user_emotions.div(user_emotions.sum(axis=1), axis=0) * 100
+
+        return user_emotions_pct.round(2)
 
     def get_emotion_trend(self, df: pd.DataFrame, period: str = 'D') -> pd.DataFrame:
+        """
+        Get emotion trend over time.
+
+        Args:
+            df: DataFrame
+            period: 'D' for daily, 'W' for weekly
+
+        Returns:
+            DataFrame with emotion trend
+        """
         if 'emotion' not in df.columns:
             return pd.DataFrame()
-        return df.set_index('datetime').groupby(
-            [pd.Grouper(freq=period), 'emotion']
-        ).size().unstack(fill_value=0).reset_index()
+
+        trend = df.set_index('datetime').groupby([pd.Grouper(freq=period), 'emotion']).size().unstack(fill_value=0)
+
+        return trend.reset_index()
 
     def get_dominant_emotion(self, df: pd.DataFrame) -> str:
-        if 'emotion' not in df.columns or len(df) == 0:
+        """Get most common emotion"""
+        if 'emotion' not in df.columns:
             return 'UNKNOWN'
-        return df['emotion'].value_counts().index[0].upper()
+
+        return df['emotion'].value_counts().index[0].upper() if len(df) > 0 else 'UNKNOWN'
 
     def get_emotion_intensity(self, df: pd.DataFrame) -> dict:
+        """Get average intensity of emotions"""
         if 'emotion_score' not in df.columns:
             return {}
-        return {
-            em.upper(): round(df[df['emotion'] == em]['emotion_score'].mean(), 3)
-            for em in df['emotion'].unique()
-        }
+
+        result = {}
+        for emotion in df['emotion'].unique():
+            mask = df['emotion'] == emotion
+            avg_score = df[mask]['emotion_score'].mean()
+            result[emotion.upper()] = round(avg_score, 3)
+
+        return result
