@@ -57,7 +57,7 @@ def _sc(light="#3E2F1C", dark="#CBD5E1"):
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="WhatsApp AI Analytics Dashboard",
+    page_title="WhatsApp Sentiment Analysis Dashboard",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1661,7 +1661,7 @@ if "df_cleaned" in st.session_state:
             f'''<div style="background:{bg_ab};border:1px solid rgba(0,0,0,0.08);
             border-radius:14px;padding:20px 24px;">
             <div style="font-size:15px;font-weight:700;color:{tc_ab};margin-bottom:10px;">
-                📊 WhatsApp AI Analytics Dashboard v2.0
+                📊 WhatsApp Sentiment Analysis Dashboard v2.0
             </div>
             <div style="font-size:12px;color:{sc_ab};line-height:1.9;">
                 💬 Chat Explorer with media detection (YouTube, links, images)<br>
@@ -1701,7 +1701,7 @@ else:
         <div style="font-size:64px;margin-bottom:16px;">📊</div>
         <div style="font-size:2.4rem;font-weight:800;color:{tc};
             font-family:'Cormorant Garamond',serif;margin-bottom:10px;line-height:1.2;">
-            WhatsApp AI Analytics
+            WhatsApp Sentiment Analysis
         </div>
         <div style="font-size:1rem;color:{sc2};max-width:520px;margin:0 auto 28px;line-height:1.7;">
             Uncover deep insights from your chats — sentiment, emotions,

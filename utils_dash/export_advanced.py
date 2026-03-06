@@ -86,7 +86,7 @@ class AdvancedExportSystem:
                 spaceAfter=12
             )
 
-            elements.append(Paragraph("WhatsApp AI Analytics Dashboard Report", title_style))
+            elements.append(Paragraph("WhatsApp Sentiment Analysis Dashboard Report", title_style))
             elements.append(Spacer(1, 0.2*inch))
 
             elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
