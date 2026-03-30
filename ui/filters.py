@@ -49,13 +49,22 @@ class FilterSystem:
         self._label("Date Range", "📅")
         min_date = df['datetime'].min().date()
         max_date = df['datetime'].max().date()
-        date_range = st.sidebar.slider(
-            "Select Date Range",
-            min_value=min_date, max_value=max_date,
-            value=(min_date, max_date),
-            key="date_filter", label_visibility="collapsed"
-        )
-        filters['date_range'] = date_range
+        # Guard: if only one date, skip slider entirely
+        if min_date == max_date:
+            filters['date_range'] = (min_date, max_date)
+        else:
+            try:
+                col1, col2 = st.sidebar.columns(2)
+                with col1:
+                    start_date = st.date_input("From", value=min_date,
+                        min_value=min_date, max_value=max_date, key="date_start")
+                with col2:
+                    end_date = st.date_input("To", value=max_date,
+                        min_value=min_date, max_value=max_date, key="date_end")
+                date_range = (start_date, end_date)
+            except Exception:
+                date_range = (min_date, max_date)
+            filters['date_range'] = date_range
 
         # ── Sentiment ────────────────────────────────────────────────────
         self._label("Sentiment", "😊")
