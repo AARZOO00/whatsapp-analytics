@@ -29,29 +29,31 @@ class BehavioralAnalyzer:
             print(f"Warning: Toxicity model not available: {e}")
             self.toxicity_available = False
 
+    _TOXIC_WORDS = [
+        'fuck','shit','bitch','bastard','asshole','damn','crap','idiot','stupid',
+        'hate','kill','die','loser','moron','dumb','wtf','stfu','kys',
+        'madarchod','bhosdike','chutiya','saala','harami','gaandu','randi',
+        'sala','kamina','kutte','gandu','bakwaas','bc','mc','bhosdi',
+        'abuse','scam','fraud','liar','useless','worthless','pathetic',
+    ]
+
     def detect_toxicity(self, text: str) -> dict:
-        """
-        Detect toxicity/abusive content in text.
-
-        Args:
-            text: Input text
-
-        Returns:
-            Dict with toxicity label and score
-        """
-        if not self.toxicity_available or not text or not isinstance(text, str):
+        """Detect toxicity — transformer if available, else rule-based."""
+        if not text or not isinstance(text, str):
             return {'is_toxic': False, 'score': 0.0}
-
-        try:
-            result = self.toxicity_pipeline(text[:512])[0]
-            is_toxic = result['label'].lower() == 'toxic'
-            score = result['score'] if is_toxic else 1 - result['score']
-
-            return {'is_toxic': is_toxic, 'score': round(score, 3)}
-        except Exception as e:
-            print(f"Warning: Toxicity detection failed: {e}")
-            return {'is_toxic': False, 'score': 0.0}
-
+        if self.toxicity_available:
+            try:
+                result = self.toxicity_pipeline(text[:512])[0]
+                is_toxic = result['label'].lower() == 'toxic'
+                score = result['score'] if is_toxic else 1 - result['score']
+                return {'is_toxic': is_toxic, 'score': round(score, 3)}
+            except Exception:
+                pass
+        text_lower = text.lower()
+        matched = [w for w in self._TOXIC_WORDS if w in text_lower]
+        if matched:
+            return {'is_toxic': True, 'score': round(min(0.5 + len(matched)*0.1, 0.99), 3)}
+        return {'is_toxic': False, 'score': 0.0}
     def analyze_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Add behavioral metrics to dataframe.

@@ -48,13 +48,24 @@ class AdvancedVisualizations:
 
     def emotion_transition_graph(self):
         """Emotion transitions over time."""
+        # Guard: emotion column must exist
+        if 'emotion' not in self.df.columns:
+            fig = go.Figure()
+            fig.update_layout(title='Emotion data not available', height=300)
+            return fig
+
         emotion_by_hour = self.df.copy()
         emotion_by_hour['hour'] = emotion_by_hour['datetime'].dt.hour
 
-        # Drop rows where emotion is NaN or not a string (avoids 'float has no .keys()' error)
+        # Drop rows where emotion is NaN or not a string
         emotion_by_hour = emotion_by_hour[
-            emotion_by_hour['emotion'].apply(lambda x: isinstance(x, str))
+            emotion_by_hour['emotion'].apply(lambda x: isinstance(x, str) and x.strip() != '')
         ]
+
+        if len(emotion_by_hour) == 0:
+            fig = go.Figure()
+            fig.update_layout(title='No emotion data available', height=300)
+            return fig
 
         emotion_dist = emotion_by_hour.groupby('hour')['emotion'].apply(
             lambda x: x.value_counts().to_dict()
