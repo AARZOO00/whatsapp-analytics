@@ -307,6 +307,30 @@ class ChatExplorer:
             em, lbl, col = omit_result
             media_html  = _omit_card(em, lbl, col, is_light)
             display_msg = ''
+            # ── Try to show actual media from ZIP ─────────────────────
+            media_files = st.session_state.get('media_files', {})
+            if media_files:
+                # WhatsApp names files like IMG-20240101-WA0001.jpg
+                # Try to match by timestamp proximity — look for any media near this message
+                import re as _re2
+                # Extract any filename pattern from raw message
+                fn_match = _re2.search(r'((?:IMG|VID|AUD|DOC|STK|PTT)-[\\w\\-]+\\.[\\w]+)', raw, _re2.I)
+                if fn_match and fn_match.group(1) in media_files:
+                    fname = fn_match.group(1)
+                    fdata = media_files[fname]
+                    ext   = fname.split('.')[-1].lower()
+                    if ext in ['jpg','jpeg','png','gif','webp']:
+                        import io as _io2
+                        st.image(_io2.BytesIO(fdata), caption=fname, use_container_width=True)
+                        media_html = ''  # replace omit card with actual image
+                    elif ext in ['mp4','mov','avi','mkv']:
+                        import io as _io3
+                        st.video(_io3.BytesIO(fdata))
+                        media_html = ''
+                    elif ext in ['mp3','opus','aac','m4a']:
+                        import io as _io4
+                        st.audio(_io4.BytesIO(fdata))
+                        media_html = ''
         else:
             # YouTube cards
             yt_ids = YOUTUBE_RE.findall(raw)
