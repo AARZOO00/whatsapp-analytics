@@ -41,7 +41,7 @@ from src.utils.file_handler import save_uploaded_file
 
 
 def _card(light_bg="#FFFFFF", light_bdr="rgba(184,136,58,0.22)",
-          dark_bg="rgba(17,24,39,0.75)", dark_bdr="rgba(0,200,150,0.14)"):
+          dark_bg="rgba(17,24,39,0.75)", dark_bdr="rgba(24,163,183,0.14)"):
     """Return theme-appropriate card background and border."""
     is_light = st.session_state.get("theme","light") == "light"
     return (light_bg if is_light else dark_bg), (light_bdr if is_light else dark_bdr)
@@ -55,9 +55,40 @@ def _sc(light="#3E2F1C", dark="#CBD5E1"):
     return light if st.session_state.get("theme","light") == "light" else dark
 
 
+def _safe_tokens(df, user=None, top_n=10):
+    """Safely get top tokens from messages."""
+    try:
+        import re as _re_tok
+        from collections import Counter
+        mc = 'message_cleaned' if 'message_cleaned' in df.columns else 'message'
+        if user:
+            texts = df[df['user'] == user][mc].fillna('').tolist()
+        else:
+            texts = df[mc].fillna('').tolist()
+        STOP = {'the','a','an','and','or','but','in','on','at','to','for','of',
+                'is','it','this','that','i','you','me','my','your','we','he',
+                'she','they','was','are','be','have','has','had','do','did',
+                'will','would','can','could','not','no','so','as','with','from',
+                'hai','nhi','bhi','ko','ka','ki','ke','se','kya','ek','aur',
+                'na','hi','ho','mein','hain','toh','par','ye','wo','woh','koi',
+                'kuch','ab','abb','ok','okay','haan','nahi','bas','mai','main',
+                'media','omitted','image','video','audio','file','attached','null',
+                'https','http','www','com','message','deleted','this','was'}
+        words = []
+        _url_re  = re.compile(r'https?://\S+')
+        _word_re = re.compile(r'[^\w\s]')
+        for t in texts:
+            t = _url_re.sub('', str(t))
+            t = _word_re.sub(' ', t.lower())
+            words.extend([w for w in t.split() if len(w) > 2 and w not in STOP])
+        return Counter(words).most_common(top_n)
+    except Exception:
+        return []
+
+
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="WhatsApp Sentiment Analysis Dashboard",
+    page_title="WhatsApp AI Analytics Dashboard",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -71,17 +102,44 @@ with st.sidebar:
 
     uploaded_file = st.file_uploader(
         "Upload WhatsApp Chat",
-        type=["txt"],
-        help="Export: WhatsApp > Settings > Chats > Export chat",
+        type=["txt", "zip"],
+        help="Export: WhatsApp > Settings > Chats > Export chat (With or Without Media)",
     )
 
     if uploaded_file is not None:
-        # Skip re-processing if same file already analyzed
         file_key = f"{uploaded_file.name}_{uploaded_file.size}"
         if st.session_state.get("_file_key") == file_key:
             st.success("✓ Analysis complete!")
         else:
-            file_path = save_uploaded_file(uploaded_file, "whatsapp-analyzer/data/raw")
+            # ── Handle ZIP file (With Media export) ──────────────────────
+            import zipfile, io, os, tempfile
+            media_files = {}  # filename → bytes
+            txt_content = None
+
+            if uploaded_file.name.endswith(".zip"):
+                with zipfile.ZipFile(io.BytesIO(uploaded_file.read())) as zf:
+                    for name in zf.namelist():
+                        ext = os.path.splitext(name)[1].lower()
+                        if ext == ".txt":
+                            txt_content = zf.read(name).decode("utf-8", errors="ignore")
+                        elif ext in [".jpg",".jpeg",".png",".gif",".webp",
+                                     ".mp4",".mov",".avi",".mkv",
+                                     ".pdf",".opus",".aac",".m4a",".mp3"]:
+                            media_files[os.path.basename(name)] = zf.read(name)
+                # Save txt to temp file
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+                tmp.write(txt_content or "")
+                tmp.close()
+                file_path = tmp.name
+                st.session_state.media_files = media_files
+                if media_files:
+                    img_count = sum(1 for f in media_files if f.lower().endswith(('.jpg','.jpeg','.png','.gif','.webp')))
+                    vid_count = sum(1 for f in media_files if f.lower().endswith(('.mp4','.mov','.avi')))
+                    aud_count = sum(1 for f in media_files if f.lower().endswith(('.mp3','.opus','.aac','.m4a')))
+                    st.success(f"📦 ZIP extracted! 🖼️ {img_count} images · 🎬 {vid_count} videos · 🎵 {aud_count} audio")
+            else:
+                file_path = save_uploaded_file(uploaded_file, "whatsapp-analyzer/data/raw")
+                st.session_state.media_files = {}
             prog = st.progress(0, text="📂 Parsing chat...")
             try:
                 parser     = WhatsAppParser()
@@ -135,7 +193,7 @@ if "df_cleaned" in st.session_state:
 
     st.sidebar.info(f"Showing {len(df_filtered)} of {len(df_cleaned)} messages")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
         "📊 Dashboard",
         "🎛️ Models",
         "💬 Chat Explorer",
@@ -144,48 +202,161 @@ if "df_cleaned" in st.session_state:
         "📈 Advanced Analytics",
         "🔬 Deep Analysis",
         "🏆 Leaderboard",
+        "🖼️ Media",
         "💾 Export",
         "⚙️ Settings",
     ])
 
     # ── Tab 1: Dashboard ─────────────────────────────────────────────────────
     with tab1:
-        st.header("Dashboard Overview")
+        # ── Theme vars ────────────────────────────────────────────────────
+        _is_lt_d = st.session_state.get('theme','light') == 'light'
+        _bg_d    = '#FFFBF2' if _is_lt_d else '#1A334A'
+        _bg_d2   = '#FFF8ED' if _is_lt_d else 'rgba(30,83,110,0.50)'
+        _tc_d    = '#18120A' if _is_lt_d else '#E8F4F8'
+        _sc_d    = '#3E2F1C' if _is_lt_d else '#5AA5CD'
+        _ac_d    = '#B8883A' if _is_lt_d else '#18A3B7'
+        _ac2_d   = '#8B6820' if _is_lt_d else '#27E6EC'
+        _bdr_d   = 'rgba(184,136,58,0.20)' if _is_lt_d else 'rgba(24,163,183,0.25)'
 
-        col1, col2, col3, col4, col5 = st.columns(5)
-        with col1:
-            render_kpi_card("Total Messages", str(len(df_filtered)), "Analyzed", "📝", 0)
-        with col2:
-            render_kpi_card("Unique Users", str(df_filtered["user"].nunique()), "Participants", "👥", 1)
-        with col3:
-            sentiment_counts = df_filtered["sentiment_vader"].value_counts()
-            positive_pct = (sentiment_counts.get("POSITIVE", 0) / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
-            render_kpi_card("Sentiment", f"{positive_pct:.0f}%", "Positive", "😊", 2)
-        with col4:
-            avg_length = df_filtered["message_length"].mean()
-            render_kpi_card("Avg Length", f"{avg_length:.0f}", "Characters", "📏", 3)
-        with col5:
-            toxic_pct = (df_filtered["is_toxic"].sum() / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
-            render_kpi_card("Toxicity", f"{toxic_pct:.1f}%", "Level", "⚠️", 4)
+        # ── Header ────────────────────────────────────────────────────────
+        st.markdown(f"""
+        <div style="margin-bottom:24px;">
+            <div style="font-size:9px;font-weight:700;letter-spacing:.18em;
+                text-transform:uppercase;color:{_ac_d};margin-bottom:6px;">
+                📊 ANALYTICS DASHBOARD
+            </div>
+            <div style="font-size:2rem;font-weight:800;color:{_tc_d};
+                font-family:'Syne','Cormorant Garamond',serif;line-height:1.1;">
+                Overview
+            </div>
+            <div style="font-size:12px;color:{_sc_d};margin-top:4px;">
+                {len(df_filtered):,} messages analyzed · {df_filtered['user'].nunique()} participants
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
+        # ── KPI Cards ─────────────────────────────────────────────────────
+        sentiment_counts = df_filtered["sentiment_vader"].value_counts()
+        positive_pct = round((sentiment_counts.get("POSITIVE", 0) / max(len(df_filtered),1) * 100), 1)
+        negative_pct = round((sentiment_counts.get("NEGATIVE", 0) / max(len(df_filtered),1) * 100), 1)
+        avg_length   = round(df_filtered["message_length"].mean(), 1)
+        toxic_pct    = round((df_filtered["is_toxic"].sum() / max(len(df_filtered),1) * 100), 1)
+        date_span    = (df_filtered['datetime'].max() - df_filtered['datetime'].min()).days
+
+        kpi_data = [
+            ("💬", "Messages",     f"{len(df_filtered):,}",          "total analyzed",    _ac_d),
+            ("👥", "Participants", str(df_filtered['user'].nunique()), "unique users",      _ac2_d),
+            ("😊", "Positive",     f"{positive_pct}%",                "sentiment",         "#27A693" if not _is_lt_d else "#2D8C6B"),
+            ("😤", "Negative",     f"{negative_pct}%",                "sentiment",         "#E05A5A" if not _is_lt_d else "#C0392B"),
+            ("📅", "Duration",     f"{date_span}d",                   "chat span",         "#5AA5CD" if not _is_lt_d else "#2471A3"),
+            ("⚠️", "Toxic",        f"{toxic_pct}%",                   "messages",          "#6F71A1" if not _is_lt_d else "#8E44AD"),
+        ]
+        kpi_cols = st.columns(6)
+        for i, (icon, label, val, sub, color) in enumerate(kpi_data):
+            with kpi_cols[i]:
+                st.markdown(f"""
+                <div style="background:{_bg_d};border:1px solid {_bdr_d};
+                    border-top:3px solid {color};border-radius:14px;
+                    padding:16px 14px;text-align:center;
+                    box-shadow:0 2px 12px rgba(0,0,0,{'0.15' if _is_lt_d else '0.3'});">
+                    <div style="font-size:24px;margin-bottom:4px;">{icon}</div>
+                    <div style="font-size:22px;font-weight:800;color:{color};
+                        font-family:'Syne',sans-serif;">{val}</div>
+                    <div style="font-size:11px;font-weight:700;color:{_tc_d};
+                        margin:2px 0;">{label}</div>
+                    <div style="font-size:10px;color:{_sc_d};">{sub}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
         render_gradient_divider()
 
+        # ── Charts Row 1 ──────────────────────────────────────────────────
+        analytics = BasicAnalytics(df_filtered)
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("📊 Sentiment Distribution")
-            analytics = BasicAnalytics(df_filtered)
+            st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_d};margin-bottom:8px;">📊 Messages per User</div>', unsafe_allow_html=True)
             st.plotly_chart(analytics.plot_user_activity(), use_container_width=True)
         with col2:
-            st.subheader("📈 Activity Timeline")
+            st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_d};margin-bottom:8px;">📈 Activity Timeline</div>', unsafe_allow_html=True)
             st.plotly_chart(analytics.plot_activity_timeline(), use_container_width=True)
 
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("🔥 Activity Heatmap")
+            st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_d};margin-bottom:8px;">🔥 Hourly Heatmap</div>', unsafe_allow_html=True)
             st.plotly_chart(analytics.plot_hourly_heatmap(), use_container_width=True)
         with col2:
-            st.subheader("🔤 Top Words")
+            st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_d};margin-bottom:8px;">🔤 Top Words</div>', unsafe_allow_html=True)
             st.plotly_chart(analytics.plot_word_frequency(), use_container_width=True)
+
+        # ── Emoji Chart ────────────────────────────────────────────────────
+        render_gradient_divider()
+        st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_d};margin-bottom:16px;">😂 Emoji Analytics</div>', unsafe_allow_html=True)
+        import re as _re_em
+        mc_em = 'message_cleaned' if 'message_cleaned' in df_filtered.columns else 'message'
+        all_emojis = []
+        for txt in df_filtered[mc_em].fillna('').astype(str):
+            all_emojis.extend(_re_em.findall(r'[🌀-🿿☀-➿]', txt))
+
+        if all_emojis:
+            from collections import Counter as _Ctr
+            top_em = _Ctr(all_emojis).most_common(20)
+            em_labels = [e[0] for e in top_em]
+            em_counts = [e[1] for e in top_em]
+            em_colors = [f'rgba(24,163,183,{0.5+0.5*(i/len(top_em)):.2f})' if not _is_lt_d
+                         else f'rgba(184,136,58,{0.4+0.6*(i/len(top_em)):.2f})'
+                         for i in range(len(top_em), 0, -1)]
+
+            fig_em = go.Figure(go.Bar(
+                x=em_labels, y=em_counts,
+                marker=dict(color=em_colors, line=dict(width=0)),
+                hovertemplate='%{x}: %{y} times<extra></extra>',
+                text=em_counts, textposition='outside',
+            ))
+            fig_em.update_layout(
+                height=320,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=_tc_d, size=16),
+                xaxis=dict(tickfont=dict(size=20), gridcolor='rgba(0,0,0,0)'),
+                yaxis=dict(gridcolor='rgba(24,163,183,0.08)' if not _is_lt_d else 'rgba(184,136,58,0.08)',
+                           tickfont=dict(color=_sc_d, size=11)),
+                margin=dict(l=10,r=10,t=20,b=10),
+                showlegend=False,
+            )
+            em_c1, em_c2 = st.columns([2,1])
+            with em_c1:
+                st.plotly_chart(fig_em, use_container_width=True)
+            with em_c2:
+                st.markdown(f"""
+                <div style="background:{_bg_d};border:1px solid {_bdr_d};
+                    border-radius:14px;padding:16px;">
+                    <div style="font-size:11px;font-weight:700;letter-spacing:.1em;
+                        text-transform:uppercase;color:{_ac_d};margin-bottom:12px;">
+                        Top Emoji Users
+                    </div>
+                """, unsafe_allow_html=True)
+                # Per user emoji count
+                _user_em = {}
+                for _, row in df_filtered.iterrows():
+                    u = row['user']
+                    ems = _re_em.findall(r'[🌀-🿿☀-➿]',
+                                         str(row.get(mc_em,'')))
+                    _user_em[u] = _user_em.get(u, 0) + len(ems)
+                top_em_users = sorted(_user_em.items(), key=lambda x: x[1], reverse=True)[:5]
+                medals = ['🥇','🥈','🥉','4️⃣','5️⃣']
+                for idx_eu, (usr, cnt_eu) in enumerate(top_em_users):
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:8px;'
+                        f'padding:6px 0;border-bottom:1px solid {_bdr_d};">'
+                        f'<span style="font-size:16px;">{medals[idx_eu]}</span>'
+                        f'<span style="flex:1;font-size:12px;font-weight:600;color:{_tc_d};">{usr}</span>'
+                        f'<span style="font-size:12px;color:{_ac2_d};font-weight:700;">{cnt_eu}</span>'
+                        f'</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("No emojis found in this chat.")
 
     # ── Tab 2: Models ────────────────────────────────────────────────────────
     with tab2:
@@ -224,7 +395,7 @@ if "df_cleaned" in st.session_state:
     with tab4:
         # ── Theme vars for Insights tab ──────────────────────────────────────
         _hl_bg  = '#FFFFFF' if st.session_state.get('theme','light')=='light' else 'rgba(17,24,39,0.75)'
-        _hl_bdr = 'rgba(184,136,58,0.22)' if st.session_state.get('theme','light')=='light' else 'rgba(0,200,150,0.15)'
+        _hl_bdr = 'rgba(184,136,58,0.22)' if st.session_state.get('theme','light')=='light' else 'rgba(24,163,183,0.15)'
         _hl_tc  = '#3E2F1C' if st.session_state.get('theme','light')=='light' else '#CBD5E1'
         _hl_vc  = '#18120A' if st.session_state.get('theme','light')=='light' else '#E2E8F0'
         summary_gen = SummaryGenerator(df_filtered)
@@ -234,18 +405,18 @@ if "df_cleaned" in st.session_state:
         st.markdown("""
         <div style="margin-bottom:6px;">
             <span style="font-family:'Outfit',sans-serif; font-size:9px; font-weight:700;
-                letter-spacing:0.20em; text-transform:uppercase; color:#00C896; opacity:0.9;">
+                letter-spacing:0.20em; text-transform:uppercase; color:#18A3B7; opacity:0.9;">
                 🤖 AI-Powered Insights
             </span>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown(f"""
-        <div style="background:linear-gradient(135deg,rgba(0,200,150,0.07),rgba(34,211,238,0.04));
-            border:1px solid rgba(0,200,150,0.25); border-left:4px solid #00C896;
+        <div style="background:linear-gradient(135deg,rgba(24,163,183,0.07),rgba(34,211,238,0.04));
+            border:1px solid rgba(24,163,183,0.25); border-left:4px solid #00C896;
             border-radius:14px; padding:22px 26px; margin-bottom:20px;">
             <div style="font-size:11px; font-weight:700; letter-spacing:0.16em;
-                text-transform:uppercase; color:#00C896; margin-bottom:10px;">
+                text-transform:uppercase; color:#18A3B7; margin-bottom:10px;">
                 📋 Conversation Overview
             </div>
             <div style="font-size:15px; line-height:1.85; color:{_hl_vc}; font-family:'Outfit',sans-serif;">
@@ -260,7 +431,7 @@ if "df_cleaned" in st.session_state:
             _narr_lc = '#3E2F1C' if st.session_state.get('theme','light')=='light' else '#CBD5E1'
             _narr_tc = '#3E2F1C' if st.session_state.get('theme','light')=='light' else '#E2E8F0'
             st.markdown(f"""
-            <div style="background:{_narr_bg}; border:1px solid rgba(0,200,150,0.18);
+            <div style="background:{_narr_bg}; border:1px solid rgba(24,163,183,0.18);
                 border-radius:12px; padding:18px 24px; margin-bottom:22px;">
                 <div style="font-size:10px; font-weight:700; letter-spacing:0.16em;
                     text-transform:uppercase; color:{_narr_lc}; margin-bottom:9px;">
@@ -277,7 +448,7 @@ if "df_cleaned" in st.session_state:
         # ── Key Insights cards ────────────────────────────────────────────
         st.markdown("""
         <div style="font-size:10px; font-weight:700; letter-spacing:0.18em;
-            text-transform:uppercase; color:#00C896; margin-bottom:14px;">
+            text-transform:uppercase; color:#18A3B7; margin-bottom:14px;">
             🔍 Key Insights
         </div>
         """, unsafe_allow_html=True)
@@ -291,7 +462,7 @@ if "df_cleaned" in st.session_state:
                 with cols[j]:
                     _i_bg = 'rgba(255,252,245,0.95)' if st.session_state.get('theme','light')=='light' else 'rgba(17,24,39,0.75)'
                     _i_tc = '#18120A' if st.session_state.get('theme','light')=='light' else '#E2E8F0'
-                    _i_bd = 'rgba(0,200,150,0.18)' if st.session_state.get('theme','light')=='light' else 'rgba(0,200,150,0.20)'
+                    _i_bd = 'rgba(24,163,183,0.18)' if st.session_state.get('theme','light')=='light' else 'rgba(24,163,183,0.20)'
                     st.markdown(f"""
                     <div style="background:{_i_bg}; border:1px solid {_i_bd};
                         border-radius:12px; padding:14px 18px; margin-bottom:10px;
@@ -312,7 +483,7 @@ if "df_cleaned" in st.session_state:
             mood = summary["overall_mood"]
             st.markdown("""
             <div style="font-size:10px; font-weight:700; letter-spacing:0.15em;
-                text-transform:uppercase; color:#00C896; margin-bottom:12px;">
+                text-transform:uppercase; color:#18A3B7; margin-bottom:12px;">
                 😊 Overall Mood
             </div>""", unsafe_allow_html=True)
 
@@ -340,13 +511,13 @@ if "df_cleaned" in st.session_state:
             topics = summary["most_discussed_topics"]
             st.markdown("""
             <div style="font-size:10px; font-weight:700; letter-spacing:0.15em;
-                text-transform:uppercase; color:#00C896; margin-bottom:12px;">
+                text-transform:uppercase; color:#18A3B7; margin-bottom:12px;">
                 🎯 Top Topics
             </div>""", unsafe_allow_html=True)
             for idx, topic in enumerate(topics[:8], 1):
                 st.markdown(f"""
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                    <span style="font-size:10px; color:#00C896; font-family:'Fira Code',monospace;
+                    <span style="font-size:10px; color:#18A3B7; font-family:'Fira Code',monospace;
                         font-weight:600; min-width:18px;">#{idx}</span>
                     <span style="font-size:13px; color:{_hl_vc}; font-family:'Outfit',sans-serif;
                         text-transform:capitalize;">{topic}</span>
@@ -361,12 +532,12 @@ if "df_cleaned" in st.session_state:
 
             st.markdown("""
             <div style="font-size:10px; font-weight:700; letter-spacing:0.15em;
-                text-transform:uppercase; color:#00C896; margin-bottom:12px;">
+                text-transform:uppercase; color:#18A3B7; margin-bottom:12px;">
                 ⚠️ Conflict & Balance
             </div>""", unsafe_allow_html=True)
 
             st.markdown(f"""
-            <div style="background:rgba(255,250,240,0.9); border:1px solid rgba(0,200,150,0.18);
+            <div style="background:rgba(255,250,240,0.9); border:1px solid rgba(24,163,183,0.18);
                 border-radius:10px; padding:14px 16px;">
                 <div style="margin-bottom:8px;">
                     <span style="font-size:11px; color:{_sc()}">Risk Level</span><br>
@@ -397,7 +568,7 @@ if "df_cleaned" in st.session_state:
         if highlights:
             st.markdown("""
             <div style="font-size:10px; font-weight:700; letter-spacing:0.18em;
-                text-transform:uppercase; color:#00C896; margin-bottom:14px;">
+                text-transform:uppercase; color:#18A3B7; margin-bottom:14px;">
                 ✨ Notable Messages
             </div>
             """, unsafe_allow_html=True)
@@ -410,7 +581,7 @@ if "df_cleaned" in st.session_state:
                     <div style="background:{_hl_bg}; border:1px solid {_hl_bdr};
                         border-radius:12px; padding:16px 18px; height:100%;">
                         <div style="font-size:10px; font-weight:700; letter-spacing:0.12em;
-                            text-transform:uppercase; color:#00C896; margin-bottom:8px;">
+                            text-transform:uppercase; color:#18A3B7; margin-bottom:8px;">
                             {h["type"]}
                         </div>
                         <div style="font-size:11px; color:{_hl_tc}; margin-bottom:6px;">
@@ -428,7 +599,7 @@ if "df_cleaned" in st.session_state:
         # ── User Engagement Table ─────────────────────────────────────────
         st.markdown("""
         <div style="font-size:10px; font-weight:700; letter-spacing:0.18em;
-            text-transform:uppercase; color:#00C896; margin-bottom:14px;">
+            text-transform:uppercase; color:#18A3B7; margin-bottom:14px;">
             👥 User Engagement
         </div>
         """, unsafe_allow_html=True)
@@ -555,7 +726,7 @@ if "df_cleaned" in st.session_state:
                 if detected != "unknown":
                     prov = PROVIDERS[detected]
                     st.markdown(
-                        f'<div style="background:rgba(0,200,150,0.08);border:1px solid rgba(0,200,150,0.25);'
+                        f'<div style="background:rgba(24,163,183,0.08);border:1px solid rgba(24,163,183,0.25);'
                         f'border-radius:8px;padding:8px 12px;font-size:12px;color:#34D399;margin-top:6px;">'
                         f'✅ Detected: <strong>{prov["name"]}</strong></div>',
                         unsafe_allow_html=True,
@@ -588,10 +759,10 @@ if "df_cleaned" in st.session_state:
             active_key      = st.session_state.ai_api_key
             active_provider = detect_provider(active_key)
             prov_info       = PROVIDERS.get(active_provider, {})
-            badge_color     = prov_info.get("badge", "#00C896")
+            badge_color     = prov_info.get("badge", "#18A3B7")
             prov_name       = prov_info.get("name", "AI")
             st.markdown(
-                f'<div style="background:rgba(0,200,150,0.06);border:1px solid rgba(0,200,150,0.20);'
+                f'<div style="background:rgba(24,163,183,0.06);border:1px solid rgba(24,163,183,0.20);'
                 f'border-radius:8px;padding:8px 14px;font-size:12px;color:#34D399;margin-bottom:12px;'
                 f'display:inline-block;">✅ Ready · {prov_name}</div>',
                 unsafe_allow_html=True,
@@ -599,10 +770,10 @@ if "df_cleaned" in st.session_state:
 
         # ── Auto Summary (no key needed) ─────────────────────────────────
         is_lt_ai = st.session_state.get('theme','light') == 'light'
-        auto_bg  = 'rgba(184,136,58,0.07)' if is_lt_ai else 'rgba(0,200,150,0.06)'
-        auto_bdr = 'rgba(184,136,58,0.25)' if is_lt_ai else 'rgba(0,200,150,0.20)'
+        auto_bg  = 'rgba(184,136,58,0.07)' if is_lt_ai else 'rgba(24,163,183,0.06)'
+        auto_bdr = 'rgba(184,136,58,0.25)' if is_lt_ai else 'rgba(24,163,183,0.20)'
         auto_tc  = '#7A6248' if is_lt_ai else '#94A3B8'
-        auto_ac  = '#B8883A' if is_lt_ai else '#00C896'
+        auto_ac  = '#B8883A' if is_lt_ai else '#18A3B7'
         st.markdown(
             f'<div style="background:{auto_bg};border:1px solid {auto_bdr};'
             f'border-radius:12px;padding:14px 18px;margin-bottom:16px;">'
@@ -643,7 +814,7 @@ if "df_cleaned" in st.session_state:
                     p_name  = "⚡ Auto Summary"
                 else:
                     pinfo   = PROVIDERS.get(prov, {})
-                    p_color = pinfo.get("badge", "#00C896")
+                    p_color = pinfo.get("badge", "#18A3B7")
                     p_name  = pinfo.get("name", "AI")
 
                 st.markdown(
@@ -754,7 +925,7 @@ if "df_cleaned" in st.session_state:
                 'Ready to Analyze</div>'
                 '<div style="font-size:13px;color:#475569;line-height:1.6;">'
                 'Choose a provider above, paste your API key,<br>'
-                'and click <b style="color:#00C896;">Generate AI Summary</b></div>'
+                'and click <b style="color:#18A3B7;">Generate AI Summary</b></div>'
                 '<div style="margin-top:16px;display:flex;justify-content:center;gap:12px;">'
                 '<span style="font-size:11px;background:rgba(5,150,105,0.12);color:#34D399;'
                 'padding:4px 10px;border-radius:20px;">✨ Gemini Free</span>'
@@ -771,7 +942,7 @@ if "df_cleaned" in st.session_state:
         st.markdown("""
         <div style="margin-bottom:6px;">
             <span style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;
-                letter-spacing:0.20em;text-transform:uppercase;color:#00C896;">
+                letter-spacing:0.20em;text-transform:uppercase;color:#18A3B7;">
                 🔬 6 Deep Analysis Features
             </span>
         </div>
@@ -792,7 +963,7 @@ if "df_cleaned" in st.session_state:
             key="deep_tab_sel",
         )
 
-        st.markdown("<hr style='border:none;border-top:1px solid rgba(0,200,150,0.15);margin:10px 0 20px;'>",
+        st.markdown("<hr style='border:none;border-top:1px solid rgba(24,163,183,0.15);margin:10px 0 20px;'>",
                     unsafe_allow_html=True)
 
         # ── 1. Network Graph ──────────────────────────────────────────────
@@ -823,11 +994,11 @@ if "df_cleaned" in st.session_state:
                 for (u1, u2), cnt in top_pairs:
                     pct = round(cnt / sum(pairs.values()) * 100, 1)
                     st.markdown(
-                        f'<div style="background:rgba(0,200,150,0.07);border:1px solid rgba(0,200,150,0.18);'
+                        f'<div style="background:rgba(24,163,183,0.07);border:1px solid rgba(24,163,183,0.18);'
                         f'border-radius:10px;padding:10px 16px;margin-bottom:8px;display:flex;'
                         f'justify-content:space-between;align-items:center;">'
                         f'<span style="color:{_tc("#18120A","#E2E8F0")};font-size:14px;">👤 {u1} &nbsp;↔️&nbsp; {u2}</span>'
-                        f'<span style="color:#00C896;font-family:monospace;font-weight:700;">'
+                        f'<span style="color:#18A3B7;font-family:monospace;font-weight:700;">'
                         f'{cnt} exchanges ({pct}%)</span></div>',
                         unsafe_allow_html=True,
                     )
@@ -883,9 +1054,9 @@ if "df_cleaned" in st.session_state:
                 for i, (word, cnt) in enumerate(top_tok):
                     with cols[i % 5]:
                         st.markdown(
-                            f'<div style="text-align:center;background:rgba(0,200,150,0.08);'
-                            f'border:1px solid rgba(0,200,150,0.2);border-radius:8px;padding:8px 4px;">'
-                            f'<div style="font-size:14px;font-weight:700;color:#00C896;">{word}</div>'
+                            f'<div style="text-align:center;background:rgba(24,163,183,0.08);'
+                            f'border:1px solid rgba(24,163,183,0.2);border-radius:8px;padding:8px 4px;">'
+                            f'<div style="font-size:14px;font-weight:700;color:#18A3B7;">{word}</div>'
                             f'<div style="font-size:11px;color:{_sc()};">{cnt}x</div></div>',
                             unsafe_allow_html=True,
                         )
@@ -1051,7 +1222,7 @@ if "df_cleaned" in st.session_state:
 
             if streak_stats.get('longest_streak_days', 0) > 0:
                 st.markdown(
-                    f'<div style="background:rgba(0,200,150,0.07);border:1px solid rgba(0,200,150,0.20);'
+                    f'<div style="background:rgba(24,163,183,0.07);border:1px solid rgba(24,163,183,0.20);'
                     f'border-radius:12px;padding:16px 20px;margin-top:8px;">'
                     f'<div style="font-size:13px;color:{_tc("#18120A","#E2E8F0")};">'
                     f'🔥 <b>Best Streak:</b> {streak_stats.get("longest_streak_days")} consecutive days '
@@ -1156,11 +1327,11 @@ if "df_cleaned" in st.session_state:
                         for i, (_, row) in enumerate(top3.iterrows()):
                             with cols3[i]:
                                 st.markdown(
-                                    f'<div style="background:{bg};border:1px solid rgba(0,200,150,0.25);'
+                                    f'<div style="background:{bg};border:1px solid rgba(24,163,183,0.25);'
                                     f'border-radius:14px;padding:18px;text-align:center;">'
                                     f'<div style="font-size:32px;margin-bottom:8px;">{medals[i]}</div>'
                                     f'<div style="font-size:13px;font-weight:700;color:{tc};">{row["Person 1"]}</div>'
-                                    f'<div style="font-size:11px;color:#00C896;margin:4px 0;">↔️ {row["Interactions"]} interactions</div>'
+                                    f'<div style="font-size:11px;color:#18A3B7;margin:4px 0;">↔️ {row["Interactions"]} interactions</div>'
                                     f'<div style="font-size:13px;font-weight:700;color:{tc};">{row["Person 2"]}</div>'
                                     f'</div>',
                                     unsafe_allow_html=True,
@@ -1255,7 +1426,7 @@ if "df_cleaned" in st.session_state:
                     pivot = hm.pivot(index='weekday', columns='hour', values='count').fillna(0)
                     fig_hm = go.Figure(go.Heatmap(
                         z=pivot.values, x=list(pivot.columns), y=list(pivot.index),
-                        colorscale=[[0,'#07090F'],[0.5,'rgba(0,200,150,0.4)'],[1,'#00C896']],
+                        colorscale=[[0,'#07090F'],[0.5,'rgba(24,163,183,0.4)'],[1,'#18A3B7']],
                         hovertemplate='%{y} %{x}:00 — %{z} messages<extra></extra>',
                     ))
                     fig_hm.update_layout(
@@ -1341,11 +1512,11 @@ if "df_cleaned" in st.session_state:
         # ══════════════════════════════════════════════════════════════════
         _is_lt_lb = st.session_state.get('theme','light') == 'light'
         bg_lb   = '#FFFBF2' if _is_lt_lb else 'rgba(17,24,39,0.75)'
-        bdr_lb  = 'rgba(184,136,58,0.25)' if _is_lt_lb else 'rgba(0,200,150,0.15)'
+        bdr_lb  = 'rgba(184,136,58,0.25)' if _is_lt_lb else 'rgba(24,163,183,0.15)'
         tc_lb   = '#18120A' if _is_lt_lb else '#E2E8F0'
         sc_lb   = '#3E2F1C' if _is_lt_lb else '#CBD5E1'
-        ac_lb   = '#B8883A' if _is_lt_lb else '#00C896'
-        ac2_lb  = '#8B6820' if _is_lt_lb else '#8B5CF6'
+        ac_lb   = '#B8883A' if _is_lt_lb else '#18A3B7'
+        ac2_lb  = '#8B6820' if _is_lt_lb else '#6F71A1'
 
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
@@ -1380,9 +1551,15 @@ if "df_cleaned" in st.session_state:
             early_msgs      =('is_early','sum'),
             pos_msgs        =('sentiment_vader', lambda x: (x=='POSITIVE').sum()),
             neg_msgs        =('sentiment_vader', lambda x: (x=='NEGATIVE').sum()),
-        ).round(1)
-        per_user['positivity_pct'] = (per_user['pos_msgs'] / per_user['total_msgs'] * 100).round(1)
-        per_user['negativity_pct'] = (per_user['neg_msgs'] / per_user['total_msgs'] * 100).round(1)
+        )
+        # Force numeric dtypes to avoid nlargest TypeError
+        for _col in ['total_msgs','avg_len','total_emojis','links_shared',
+                     'night_msgs','early_msgs','pos_msgs','neg_msgs']:
+            if _col in per_user.columns:
+                per_user[_col] = pd.to_numeric(per_user[_col], errors='coerce').fillna(0)
+        per_user = per_user.round(1)
+        per_user['positivity_pct'] = (per_user['pos_msgs'] / per_user['total_msgs'].replace(0,1) * 100).round(1)
+        per_user['negativity_pct'] = (per_user['neg_msgs'] / per_user['total_msgs'].replace(0,1) * 100).round(1)
         per_user = per_user.sort_values('total_msgs', ascending=False)
 
         medals = ['🥇','🥈','🥉']
@@ -1474,14 +1651,60 @@ if "df_cleaned" in st.session_state:
         )
 
 
-    # ── Tab 8: Export ────────────────────────────────────────────────────────
+    # ── Tab 8: Media Gallery ─────────────────────────────────────────────────
     with tab9:
+        _mf = st.session_state.get('media_files', {})
+        _is_lt_mg = st.session_state.get('theme','light') == 'light'
+        _tc_mg = '#18120A' if _is_lt_mg else '#E2E8F0'
+        _sc_mg = '#3E2F1C' if _is_lt_mg else '#CBD5E1'
+        _ac_mg = '#B8883A' if _is_lt_mg else '#18A3B7'
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
+            <div style="font-size:42px;">🖼️</div>
+            <div>
+                <div style="font-size:1.6rem;font-weight:800;color:{_tc_mg};
+                    font-family:'Cormorant Garamond',serif;">Media Gallery</div>
+                <div style="font-size:13px;color:{_sc_mg};">Images, videos & audio from your chat</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if not _mf:
+            st.info("📦 Upload a **ZIP file** (WhatsApp export **With Media**) to see media here.\n\n**How to export with media:**\n- Android: Chat → ⋮ → More → Export Chat → **Include Media**\n- iPhone: Chat → Contact Name → Export Chat → **Include Media**")
+        else:
+            import io as _io_mg
+            imgs = {k:v for k,v in _mf.items() if k.lower().endswith(('.jpg','.jpeg','.png','.gif','.webp'))}
+            vids = {k:v for k,v in _mf.items() if k.lower().endswith(('.mp4','.mov','.avi','.mkv'))}
+            auds = {k:v for k,v in _mf.items() if k.lower().endswith(('.mp3','.opus','.aac','.m4a'))}
+            docs = {k:v for k,v in _mf.items() if k.lower().endswith(('.pdf','.doc','.docx'))}
+            if imgs:
+                st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_mg};margin-bottom:12px;">🖼️ Images ({len(imgs)})</div>', unsafe_allow_html=True)
+                cols_mg = st.columns(3)
+                for idx_mg,(fname_mg,fdata_mg) in enumerate(list(imgs.items())[:30]):
+                    with cols_mg[idx_mg % 3]:
+                        st.image(_io_mg.BytesIO(fdata_mg), caption=fname_mg, use_container_width=True)
+            if vids:
+                st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_mg};margin:16px 0 12px;">🎬 Videos ({len(vids)})</div>', unsafe_allow_html=True)
+                for fname_mg,fdata_mg in list(vids.items())[:5]:
+                    st.markdown(f'**{fname_mg}**')
+                    st.video(_io_mg.BytesIO(fdata_mg))
+            if auds:
+                st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_mg};margin:16px 0 12px;">🎵 Audio ({len(auds)})</div>', unsafe_allow_html=True)
+                for fname_mg,fdata_mg in list(auds.items())[:10]:
+                    st.markdown(f'**{fname_mg}**')
+                    st.audio(_io_mg.BytesIO(fdata_mg))
+            if docs:
+                st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_mg};margin:16px 0 12px;">📄 Documents ({len(docs)})</div>', unsafe_allow_html=True)
+                for fname_mg,fdata_mg in list(docs.items())[:10]:
+                    st.download_button(f"⬇️ {fname_mg}", fdata_mg, file_name=fname_mg, key=f"doc_{fname_mg}")
+
+    # ── Tab 9: Export ────────────────────────────────────────────────────────
+    with tab10:
         _is_lt_ex = st.session_state.get('theme','light') == 'light'
         bg_ex  = '#FFFBF2' if _is_lt_ex else 'rgba(17,24,39,0.75)'
-        bdr_ex = 'rgba(184,136,58,0.25)' if _is_lt_ex else 'rgba(0,200,150,0.15)'
+        bdr_ex = 'rgba(184,136,58,0.25)' if _is_lt_ex else 'rgba(24,163,183,0.15)'
         tc_ex  = '#18120A' if _is_lt_ex else '#E2E8F0'
         sc_ex  = '#3E2F1C' if _is_lt_ex else '#CBD5E1'
-        ac_ex  = '#B8883A' if _is_lt_ex else '#00C896'
+        ac_ex  = '#B8883A' if _is_lt_ex else '#18A3B7'
 
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
@@ -1624,8 +1847,8 @@ if "df_cleaned" in st.session_state:
         except Exception:
             pass
 
-    # ── Tab 9: Settings ──────────────────────────────────────────────────────
-    with tab10:
+    # ── Tab 10: Settings ─────────────────────────────────────────────────────
+    with tab11:
         st.header("Settings & Configuration")
         st.subheader("📊 Dashboard Settings")
 
@@ -1656,12 +1879,12 @@ if "df_cleaned" in st.session_state:
         bg_ab  = '#FFFBF2' if _is_lt_ab else 'rgba(17,24,39,0.75)'
         tc_ab  = '#18120A' if _is_lt_ab else '#E2E8F0'
         sc_ab  = '#3E2F1C' if _is_lt_ab else '#CBD5E1'
-        ac_ab  = '#B8883A' if _is_lt_ab else '#00C896'
+        ac_ab  = '#B8883A' if _is_lt_ab else '#18A3B7'
         st.markdown(
             f'''<div style="background:{bg_ab};border:1px solid rgba(0,0,0,0.08);
             border-radius:14px;padding:20px 24px;">
             <div style="font-size:15px;font-weight:700;color:{tc_ab};margin-bottom:10px;">
-                📊 WhatsApp Sentiment Analysis Dashboard v2.0
+                📊 WhatsApp AI Analytics Dashboard v2.0
             </div>
             <div style="font-size:12px;color:{sc_ab};line-height:1.9;">
                 💬 Chat Explorer with media detection (YouTube, links, images)<br>
@@ -1689,11 +1912,11 @@ else:
     _is_lt_ob = st.session_state.get('theme','light') == 'light'
     hero_bg   = 'linear-gradient(135deg,#FFF8ED 0%,#FFF3DC 50%,#FFF8ED 100%)' if _is_lt_ob else 'linear-gradient(135deg,#07090F 0%,#0D1320 50%,#07090F 100%)'
     card_bg   = '#FFFFFF' if _is_lt_ob else 'rgba(17,24,39,0.75)'
-    card_bdr  = 'rgba(184,136,58,0.25)' if _is_lt_ob else 'rgba(0,200,150,0.15)'
+    card_bdr  = 'rgba(184,136,58,0.25)' if _is_lt_ob else 'rgba(24,163,183,0.15)'
     tc        = '#18120A' if _is_lt_ob else '#E2E8F0'
     sc2       = '#7A6248' if _is_lt_ob else '#94A3B8'
-    ac        = '#B8883A' if _is_lt_ob else '#00C896'
-    ac2       = '#8B6820' if _is_lt_ob else '#8B5CF6'
+    ac        = '#B8883A' if _is_lt_ob else '#18A3B7'
+    ac2       = '#8B6820' if _is_lt_ob else '#6F71A1'
 
     st.markdown(f"""
     <div style="background:{hero_bg};border-radius:24px;padding:56px 40px;
@@ -1701,7 +1924,7 @@ else:
         <div style="font-size:64px;margin-bottom:16px;">📊</div>
         <div style="font-size:2.4rem;font-weight:800;color:{tc};
             font-family:'Cormorant Garamond',serif;margin-bottom:10px;line-height:1.2;">
-            WhatsApp Sentiment Analysis
+            WhatsApp AI Analytics
         </div>
         <div style="font-size:1rem;color:{sc2};max-width:520px;margin:0 auto 28px;line-height:1.7;">
             Uncover deep insights from your chats — sentiment, emotions,

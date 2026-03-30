@@ -205,45 +205,47 @@ def _inject_dark_css():
 /* ── Instant paint — prevents light flash ── */
 html, body, [data-testid="stAppViewContainer"],
 [data-testid="stApp"], .stApp, #root {
-    background-color: #07090F !important;
-    color: #F0F6FF !important;
+    background-color: #0F1E2A !important;
+    color: #E8F4F8 !important;
 }
 [data-testid="stHeader"] {
-    background-color: #07090F !important;
+    background-color: #0F1E2A !important;
 }
 [data-testid="stSidebar"] {
-    background-color: #0D1117 !important;
+    background-color: #1A334A !important;
 }
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Outfit:wght@300;400;600;700&family=Fira+Code:wght@400;500&display=swap');
 
 :root {
-    --bg:        #07090F;
-    --bg-card:   rgba(17,24,39,0.75);
-    --ink:       #F0F6FF;
-    --ink-mid:   #94A3B8;
-    --ink-soft:  #475569;
-    --teal:      #00C896;
-    --teal-hi:   #00FFB8;
-    --cyan:      #22D3EE;
-    --violet:    #8B5CF6;
-    --gold:      #F59E0B;
-    --border:    rgba(0,200,150,0.14);
-    --shadow-md: 0 6px 28px rgba(0,0,0,0.4);
-    --shadow-lg: 0 14px 48px rgba(0,0,0,0.55);
-    --glow:      0 0 0 3px rgba(0,200,150,0.18);
+    --bg:        #0F1E2A;
+    --bg-card:   rgba(26,51,74,0.85);
+    --bg-card2:  rgba(30,83,110,0.60);
+    --ink:       #E8F4F8;
+    --ink-mid:   #5AA5CD;
+    --ink-soft:  #6F71A1;
+    --teal:      #18A3B7;
+    --teal-hi:   #27E6EC;
+    --cyan:      #27E6EC;
+    --violet:    #6F71A1;
+    --steel:     #5AA5CD;
+    --gold:      #27E6EC;
+    --border:    rgba(24,163,183,0.20);
+    --shadow-md: 0 6px 28px rgba(0,0,0,0.5);
+    --shadow-lg: 0 14px 48px rgba(0,0,0,0.65);
+    --glow:      0 0 0 3px rgba(39,230,236,0.20);
 }
 
 html, body, .stApp {
     background:
-        radial-gradient(ellipse 80% 50% at 15% 10%, rgba(0,200,150,0.09) 0%, transparent 55%),
-        radial-gradient(ellipse 60% 40% at 85% 80%, rgba(139,92,246,0.07) 0%, transparent 55%),
-        radial-gradient(ellipse 40% 60% at 50% 50%, rgba(34,211,238,0.04) 0%, transparent 65%),
-        #07090F !important;
+        radial-gradient(ellipse 80% 50% at 15% 10%, rgba(24,163,183,0.12) 0%, transparent 55%),
+        radial-gradient(ellipse 60% 40% at 85% 80%, rgba(111,113,161,0.10) 0%, transparent 55%),
+        radial-gradient(ellipse 40% 60% at 50% 50%, rgba(39,230,236,0.05) 0%, transparent 65%),
+        #0F1E2A !important;
     color:var(--ink) !important;
     font-family:'Outfit',sans-serif !important;
 }
 
-[data-testid="stSidebar"] { background:linear-gradient(180deg,rgba(5,8,18,0.97),rgba(10,14,28,0.95)) !important; border-right:1px solid var(--border) !important; }
+[data-testid="stSidebar"] { background:linear-gradient(180deg,#1A334A,#0F1E2A) !important; border-right:1px solid var(--border) !important; }
 [data-testid="stSidebar"] * { font-family:'Outfit',sans-serif !important; color:var(--ink-mid) !important; }
 
 h1 { font-family:'Syne',sans-serif !important; font-weight:800 !important; color:var(--ink) !important; -webkit-text-fill-color:var(--ink) !important; }
@@ -255,9 +257,9 @@ label { color:var(--ink-mid) !important; }
 [data-testid="stTabs"] [role="tablist"] { border-bottom:1.5px solid var(--border) !important; }
 [data-testid="stTabs"] [role="tab"] { font-family:'Outfit',sans-serif !important; font-size:11px !important; font-weight:700 !important; letter-spacing:.09em !important; text-transform:uppercase !important; color:var(--ink-soft) !important; border-bottom:2px solid transparent !important; padding:12px 18px !important; transition:all .25s ease !important; background:transparent !important; }
 [data-testid="stTabs"] [role="tab"]:hover { color:var(--teal) !important; }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] { color:var(--teal-hi) !important; border-bottom:2.5px solid var(--teal) !important; text-shadow:0 0 18px rgba(0,200,150,0.35) !important; background:linear-gradient(180deg,rgba(0,200,150,0.07),transparent) !important; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] { color:var(--teal-hi) !important; border-bottom:2.5px solid var(--teal) !important; text-shadow:0 0 18px rgba(39,230,236,0.35) !important; background:linear-gradient(180deg,rgba(24,163,183,0.10),transparent) !important; }
 
-.stButton > button { font-family:'Outfit',sans-serif !important; font-size:11.5px !important; font-weight:700 !important; letter-spacing:.10em !important; text-transform:uppercase !important; background:linear-gradient(135deg,#00C896,#0EA5E9 50%,#8B5CF6) !important; color:#FFFFFF !important; border:none !important; border-radius:12px !important; padding:12px 30px !important; transition:all .32s ease !important; }
+.stButton > button { font-family:'Outfit',sans-serif !important; font-size:11.5px !important; font-weight:700 !important; letter-spacing:.10em !important; text-transform:uppercase !important; background:linear-gradient(135deg,#18A3B7,#27E6EC 50%,#5AA5CD) !important; color:#FFFFFF !important; border:none !important; border-radius:12px !important; padding:12px 30px !important; transition:all .32s ease !important; }
 .stButton > button:hover { opacity:.88 !important; transform:translateY(-3px) !important; }
 
 input, textarea, [data-baseweb="input"] input { background:rgba(17,24,39,0.6) !important; border:1px solid var(--border) !important; color:var(--ink) !important; border-radius:10px !important; }
@@ -313,16 +315,16 @@ def render_kpi_card(title: str, value: str, metric: str, icon: str = "📊", idx
     if is_light:
         bg      = "#FFFFFF"
         bdr     = "rgba(184,136,58,0.22)"
-        val_c   = "#A59C91"
+        val_c   = "#18120A"
         title_c = "#BBA98C"
         met_c   = "#B8883A"
         shadow  = "0 2px 14px rgba(24,18,10,0.08)"
     else:
-        bg      = "rgba(17,24,39,0.75)"
-        bdr     = "rgba(0,200,150,0.14)"
-        val_c   = "#F0F6FF"
-        title_c = "#CED5DB2F"
-        met_c   = "#00C896"
+        bg      = "rgba(26,51,74,0.85)"
+        bdr     = "rgba(24,163,183,0.22)"
+        val_c   = "#E8F4F8"
+        title_c = "#5AA5CD"
+        met_c   = "#27E6EC"
         shadow  = "0 6px 28px rgba(0,0,0,0.35)"
 
     html = (

@@ -20,7 +20,7 @@ from typing import Dict, List, Tuple
 import io
 
 # ── Shared palette ────────────────────────────────────────────────────────
-_TEAL   = '#00C896'
+_TEAL   = '#18A3B7'
 _CYAN   = '#22D3EE'
 _PINK   = '#F472B6'
 _AMBER  = '#FBBF24'
@@ -113,7 +113,7 @@ def build_network_graph(df: pd.DataFrame) -> go.Figure:
             x=[x_pos[u1], x_pos[u2], None],
             y=[y_pos[u1], y_pos[u2], None],
             mode='lines',
-            line=dict(width=width, color=f'rgba(0,200,150,{alpha:.2f})'),
+            line=dict(width=width, color=f'rgba(24,163,183,{alpha:.2f})'),
             hoverinfo='none',
             showlegend=False,
         ))
@@ -209,8 +209,8 @@ def response_time_analysis(df: pd.DataFrame) -> Tuple[go.Figure, go.Figure, pd.D
         xaxis_title='', yaxis_title='Minutes',
         height=400, **_DARK_LAYOUT,
     )
-    fig_avg.update_xaxes(gridcolor='rgba(0,200,150,0.06)')
-    fig_avg.update_yaxes(gridcolor='rgba(0,200,150,0.06)')
+    fig_avg.update_xaxes(gridcolor='rgba(24,163,183,0.06)')
+    fig_avg.update_yaxes(gridcolor='rgba(24,163,183,0.06)')
 
     # Histogram — all response gaps
     all_times = [t for times in response_times.values() for t in times if t < 60]
@@ -256,7 +256,7 @@ def word_cloud_treemap(df: pd.DataFrame, user: str = None, top_n: int = 40) -> g
         textfont=dict(size=13, color='#FFFFFF', family='Outfit'),
         marker=dict(
             colors=counts,
-            colorscale=[[0, 'rgba(0,200,150,0.4)'], [0.5, '#00C896'], [1, '#22D3EE']],
+            colorscale=[[0, 'rgba(24,163,183,0.4)'], [0.5, '#18A3B7'], [1, '#22D3EE']],
             showscale=False,
             line=dict(color='rgba(0,0,0,0.2)', width=1),
         ),
@@ -367,9 +367,9 @@ def personality_profiles(df: pd.DataFrame) -> Tuple[go.Figure, pd.DataFrame]:
         polar=dict(
             bgcolor='rgba(17,24,39,0.5)',
             radialaxis=dict(visible=True, range=[0,100],
-                           gridcolor='rgba(0,200,150,0.12)',
+                           gridcolor='rgba(24,163,183,0.12)',
                            tickfont=dict(color='#64748B', size=9)),
-            angularaxis=dict(gridcolor='rgba(0,200,150,0.12)',
+            angularaxis=dict(gridcolor='rgba(24,163,183,0.12)',
                             tickfont=dict(color='#94A3B8', size=11)),
         ),
         showlegend=True,
@@ -424,7 +424,7 @@ def monthly_recap(df: pd.DataFrame, period: str = 'M') -> go.Figure:
         name='Messages',
         marker=dict(
             color=agg['messages'],
-            colorscale=[[0, 'rgba(0,200,150,0.3)'], [1, '#00C896']],
+            colorscale=[[0, 'rgba(24,163,183,0.3)'], [1, '#18A3B7']],
             showscale=False,
         ),
         yaxis='y1',
@@ -445,13 +445,13 @@ def monthly_recap(df: pd.DataFrame, period: str = 'M') -> go.Figure:
     _fc2     = '#3E2F1C' if _is_lt2 else '#94A3B8'
     _tc2     = '#18120A' if _is_lt2 else '#E2E8F0'
     _bg2     = '#FFFBF2' if _is_lt2 else '#07090F'
-    _grid2   = 'rgba(184,136,58,0.08)' if _is_lt2 else 'rgba(0,200,150,0.06)'
+    _grid2   = 'rgba(184,136,58,0.08)' if _is_lt2 else 'rgba(24,163,183,0.06)'
     _layout2 = dict(paper_bgcolor=_bg2, plot_bgcolor=_bg2,
                     font_color=_tc2, margin=dict(l=20,r=20,t=60,b=20))
     title = 'Monthly Recap' if period == 'M' else 'Weekly Recap'
     fig.update_layout(
         title=dict(text=title + ' — Messages & Positivity Trend',
-                   font=dict(color='#B8883A' if _is_lt2 else '#00C896', size=14)),
+                   font=dict(color='#B8883A' if _is_lt2 else '#18A3B7', size=14)),
         yaxis=dict(title=dict(text='Messages', font=dict(color=_TEAL)),
                    gridcolor=_grid2, tickfont=dict(color=_fc2)),
         yaxis2=dict(title=dict(text='Positive %', font=dict(color=_PINK)),
@@ -519,7 +519,7 @@ def recap_stat_card(df: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(
         title=dict(text='Chat Recap — Key Stats',
-                   font=dict(color='#00C896' if not _is_lt else '#B8883A', size=14)),
+                   font=dict(color='#18A3B7' if not _is_lt else '#B8883A', size=14)),
         height=220,
         **_layout,
     )
@@ -555,7 +555,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
 
     # ── Custom styles ─────────────────────────────────────────────────────
     h1 = ParagraphStyle('H1', parent=styles['Heading1'],
-                        fontSize=22, textColor=colors.HexColor('#00C896'),
+                        fontSize=22, textColor=colors.HexColor('#18A3B7'),
                         spaceAfter=6, fontName='Helvetica-Bold')
     h2 = ParagraphStyle('H2', parent=styles['Heading2'],
                         fontSize=14, textColor=colors.HexColor('#0A0F1A'),
@@ -583,13 +583,13 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
 
     # ── Page 1: Cover ─────────────────────────────────────────────────────
     story.append(Spacer(1, 1.5*cm))
-    story.append(Paragraph("WhatsApp Sentiment Analysis", h1))
+    story.append(Paragraph("WhatsApp AI Analytics", h1))
     story.append(Paragraph("Conversation Analysis Report", ParagraphStyle(
         'Sub', parent=styles['Normal'], fontSize=14,
         textColor=colors.HexColor('#475569'), spaceAfter=4)))
     story.append(Paragraph(date_str, caption))
     story.append(HRFlowable(width='100%', thickness=2,
-                            color=colors.HexColor('#00C896'), spaceAfter=16))
+                            color=colors.HexColor('#18A3B7'), spaceAfter=16))
 
     # Overview stats table
     overview_data = [
@@ -605,7 +605,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
     ]
     tbl = Table(overview_data, colWidths=[8*cm, 8*cm])
     tbl.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#00C896')),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#18A3B7')),
         ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
         ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE',   (0,0), (-1,0), 11),
@@ -702,7 +702,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
         ]
     m_tbl = Table(mood_data, colWidths=[5*cm, 5*cm, 7.5*cm])
     m_tbl.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#00C896')),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#18A3B7')),
         ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
         ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
         ('ALIGN',      (0,0), (-1,-1), 'CENTER'),
@@ -721,7 +721,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
                             color=colors.HexColor('#E2E8F0'), spaceAfter=6))
     from datetime import datetime
     story.append(Paragraph(
-        f"Generated by WhatsApp Sentiment Analysis Dashboard  •  {datetime.now().strftime('%d %b %Y %H:%M')}",
+        f"Generated by WhatsApp AI Analytics Dashboard  •  {datetime.now().strftime('%d %b %Y %H:%M')}",
         center,
     ))
 
@@ -774,8 +774,8 @@ def ghost_members_analysis(df: pd.DataFrame) -> tuple:
         height=420, showlegend=False,
         **_DARK_LAYOUT,
     )
-    fig.update_xaxes(gridcolor='rgba(0,200,150,0.06)')
-    fig.update_yaxes(gridcolor='rgba(0,200,150,0.06)')
+    fig.update_xaxes(gridcolor='rgba(24,163,183,0.06)')
+    fig.update_yaxes(gridcolor='rgba(24,163,183,0.06)')
 
     # Ghost members (< 1%)
     ghosts = tier_df[tier_df['Share %'] < 1.0].sort_values('Messages')
@@ -822,7 +822,7 @@ def emoji_analytics(df: pd.DataFrame) -> tuple:
         y=counts_list,
         marker=dict(
             color=counts_list,
-            colorscale=[[0, 'rgba(0,200,150,0.4)'], [1, '#F472B6']],
+            colorscale=[[0, 'rgba(24,163,183,0.4)'], [1, '#F472B6']],
             showscale=False,
         ),
         text=counts_list,
@@ -935,8 +935,8 @@ def streak_analysis(df: pd.DataFrame) -> tuple:
         z=df_cal['count'],
         colorscale=[
             [0.0, 'rgba(17,24,39,0.8)'],
-            [0.3, 'rgba(0,200,150,0.3)'],
-            [0.7, '#00C896'],
+            [0.3, 'rgba(24,163,183,0.3)'],
+            [0.7, '#18A3B7'],
             [1.0, '#22D3EE'],
         ],
         hoverongaps=False,
@@ -1051,7 +1051,7 @@ def reply_chain_analysis(df: pd.DataFrame) -> Tuple[go.Figure, go.Figure, pd.Dat
 
         fig_reply = go.Figure(go.Heatmap(
             z=matrix, x=users_set, y=users_set,
-            colorscale=[[0,'#07090F'],[0.3,'rgba(0,200,150,0.3)'],[1,'#00C896']],
+            colorscale=[[0,'#07090F'],[0.3,'rgba(24,163,183,0.3)'],[1,'#18A3B7']],
             text=[[str(v) if v>0 else '' for v in row] for row in matrix],
             texttemplate='%{text}', showscale=True,
             hovertemplate='%{y} → %{x}: %{z} replies<extra></extra>',
@@ -1069,7 +1069,7 @@ def reply_chain_analysis(df: pd.DataFrame) -> Tuple[go.Figure, go.Figure, pd.Dat
     top_starters = sorted(starter_counts.items(), key=lambda x: -x[1])[:10]
     names = [x[0] for x in top_starters]
     vals  = [x[1] for x in top_starters]
-    colors = [f'rgba(0,200,150,{0.4+0.6*(v/max(vals,default=1))})' for v in vals]
+    colors = [f'rgba(24,163,183,{0.4+0.6*(v/max(vals,default=1))})' for v in vals]
 
     fig_start = go.Figure(go.Bar(
         x=vals, y=names, orientation='h',
@@ -1239,7 +1239,7 @@ def conversation_flow_analysis(df: pd.DataFrame) -> go.Figure:
 
     hourly = df3.groupby(['hour','user']).size().reset_index(name='count')
 
-    clrs = ['#00C896','#8B5CF6','#F59E0B','#F87171','#34D399','#60A5FA']
+    clrs = ['#18A3B7','#8B5CF6','#F59E0B','#F87171','#34D399','#60A5FA']
     fig  = go.Figure()
     for i, u in enumerate(top_users):
         udata = hourly[hourly['user'] == u]
@@ -1382,7 +1382,7 @@ def roast_generator(df: pd.DataFrame) -> List[Dict]:
             'user':   u,
             'roast':  ' '.join(lines[:2]),   # max 2 lines
             'stats':  f"{n} msgs · {pct}% · avg {int(avg_len)} chars",
-            'color':  '#F59E0B' if pct > 15 else ('#94A3B8' if pct < 3 else '#00C896'),
+            'color':  '#F59E0B' if pct > 15 else ('#94A3B8' if pct < 3 else '#18A3B7'),
         })
 
     return roasts
