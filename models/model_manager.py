@@ -256,13 +256,15 @@ class ModelManager:
             )
 
     def render_sentiment_charts(self, df_res: pd.DataFrame, model_name: str):
-        """Render sentiment distribution + per-user chart."""
+        """Render sentiment distribution + per-user chart. Always returns (fig_pie, fig_bar, fig_time|None)."""
         if 'sentiment_vader' not in df_res.columns:
-            return
+            return None, None, None
+
+        colors = {'POSITIVE': '#4ADE80', 'NEGATIVE': '#F87171', 'NEUTRAL': '#FBBF24'}
+        fill_colors = {'POSITIVE': 'rgba(74,222,128,0.15)', 'NEGATIVE': 'rgba(248,113,113,0.15)', 'NEUTRAL': 'rgba(251,191,36,0.15)'}
 
         # Pie chart
         dist = df_res['sentiment_vader'].value_counts()
-        colors = {'POSITIVE': '#4ADE80', 'NEGATIVE': '#F87171', 'NEUTRAL': '#FBBF24'}
         fig_pie = go.Figure(go.Pie(
             labels=dist.index.tolist(),
             values=dist.values.tolist(),
@@ -301,32 +303,35 @@ class ModelManager:
         )
 
         # Sentiment over time
+        fig_time = None
         if 'datetime' in df_res.columns:
-            trend = (
-                df_res.set_index('datetime')
-                .groupby([pd.Grouper(freq='D'), 'sentiment_vader'])
-                .size()
-                .unstack(fill_value=0)
-            ).reset_index()
-            fig_time = go.Figure()
-            for label, color in colors.items():
-                if label in trend.columns:
-                    fig_time.add_trace(go.Scatter(
-                        x=trend['datetime'], y=trend[label],
-                        name=label, mode='lines',
-                        line=dict(color=color, width=2),
-                        fill='tozeroy',
-                        fillcolor=color.replace(')', ',0.15)').replace('rgb', 'rgba') if 'rgb' in color else color + '26',
-                    ))
-            fig_time.update_layout(
-                title='Sentiment Trend Over Time',
-                height=300, **_DARK_LAYOUT,
-                xaxis_title='', yaxis_title='Messages',
-                legend=dict(orientation='h', y=1.08, font=dict(color='#94A3B8')),
-            )
-            return fig_pie, fig_bar, fig_time
+            try:
+                trend = (
+                    df_res.set_index('datetime')
+                    .groupby([pd.Grouper(freq='D'), 'sentiment_vader'])
+                    .size()
+                    .unstack(fill_value=0)
+                ).reset_index()
+                fig_time = go.Figure()
+                for label, color in colors.items():
+                    if label in trend.columns:
+                        fig_time.add_trace(go.Scatter(
+                            x=trend['datetime'], y=trend[label],
+                            name=label, mode='lines',
+                            line=dict(color=color, width=2),
+                            fill='tozeroy',
+                            fillcolor=fill_colors.get(label, 'rgba(148,163,184,0.15)'),
+                        ))
+                fig_time.update_layout(
+                    title='Sentiment Trend Over Time',
+                    height=300, **_DARK_LAYOUT,
+                    xaxis_title='', yaxis_title='Messages',
+                    legend=dict(orientation='h', y=1.08, font=dict(color='#94A3B8')),
+                )
+            except Exception:
+                fig_time = None
 
-        return fig_pie, fig_bar, None
+        return fig_pie, fig_bar, fig_time
 
     def get_model_comparison(self, df: pd.DataFrame) -> pd.DataFrame:
         rows = []
