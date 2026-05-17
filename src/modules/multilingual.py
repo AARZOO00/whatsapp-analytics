@@ -1,198 +1,262 @@
+"""
+multilingual.py — Proper multilingual detection + Hinglish-aware analysis
+Supports: English, Hindi (Devanagari), Hinglish (Roman Hindi), Arabic, mixed
+"""
+import re
 import pandas as pd
-try:
-    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-    _HAS_TRANSFORMERS = True
-except ImportError:
-    _HAS_TRANSFORMERS = False
-    pipeline = None
-    AutoTokenizer = None
-    AutoModelForSequenceClassification = None
+import numpy as np
+from collections import Counter
 import warnings
-
 warnings.filterwarnings('ignore')
+
+try:
+    from langdetect import detect, DetectorFactory
+    DetectorFactory.seed = 42
+    _LANGDETECT = True
+except ImportError:
+    _LANGDETECT = False
+
+# ── Script / Unicode range helpers ───────────────────────────────────────────
+_DEVANAGARI_RE = re.compile(r'[\u0900-\u097F]')
+_ARABIC_RE     = re.compile(r'[\u0600-\u06FF\u0750-\u077F]')
+_EMOJI_RE      = re.compile(r'[\U0001F300-\U0001FFFF\U00002600-\U000027BF\U0001F900-\U0001F9FF]')
+
+# Roman-Hindi / Hinglish marker words
+_HINGLISH_MARKERS = {
+    'hai','hain','nahi','nhi','aur','kya','yaar','bhai','behen',
+    'accha','acha','theek','thik','karo','karna','tha','thi','the',
+    'mera','meri','tera','teri','hum','tum','aap','woh','yeh',
+    'bahut','bohot','bilkul','zaroor','matlab','seedha','seedhi',
+    'inshallah','mashallah','alhamdulillah','subhanallah',
+    'bolo','batao','suno','dekho','aao','jao','karo','raho',
+    'mast','zabardast','badhiya','bakwaas','bekar','faltu',
+    'yaar','bhai','dost','boss','jaan','beta','beti',
+    'abhi','phir','baad','pehle','kal','aaj','kal',
+}
+
+_LANG_LABELS = {
+    'en':       'English',
+    'hi':       'Hindi',
+    'hinglish': 'Hinglish',
+    'ar':       'Arabic',
+    'mixed':    'Mixed',
+    'unknown':  'Unknown',
+}
+
+_LANG_FLAGS = {
+    'en':       '🇬🇧',
+    'hi':       '🇮🇳',
+    'hinglish': '🔀',
+    'ar':       '🇸🇦',
+    'mixed':    '🌍',
+    'unknown':  '❓',
+}
+
+def _extract_emojis(text: str) -> list:
+    return _EMOJI_RE.findall(text)
+
+def _devanagari_ratio(text: str) -> float:
+    chars = [c for c in text if c.strip()]
+    if not chars:
+        return 0.0
+    return sum(1 for c in chars if _DEVANAGARI_RE.match(c)) / len(chars)
+
+def _arabic_ratio(text: str) -> float:
+    chars = [c for c in text if c.strip()]
+    if not chars:
+        return 0.0
+    return sum(1 for c in chars if _ARABIC_RE.match(c)) / len(chars)
+
+def _hinglish_score(text: str) -> float:
+    """0-1 score of how Hinglish a roman-script text is."""
+    words = re.findall(r'\b\w+\b', text.lower())
+    if not words:
+        return 0.0
+    hits = sum(1 for w in words if w in _HINGLISH_MARKERS)
+    return hits / len(words)
+
 
 class MultilingualAnalyzer:
     """
-    Support for multilingual text analysis.
-    English, Hindi, Hinglish (mix of Hindi and English).
+    Proper multilingual analyzer for WhatsApp chats.
+    - Detects English, Hindi (Devanagari), Hinglish, Arabic, Mixed
+    - Provides emoji analytics per language
+    - Provides charts for language distribution
+    - Language-aware sentiment comparison
     """
 
     def __init__(self):
-        self.language_detector = None
-        self.hindi_sentiment_available = False
-        self.hinglish_sentiment_available = False
+        self.language_detection_available = _LANGDETECT
 
-        try:
-            from langdetect import detect
-            self.detect_language = detect
-            self.language_detection_available = True
-        except Exception as e:
-            print(f"Warning: Language detection not available: {e}")
-            self.language_detection_available = False
-
-        try:
-            self.hindi_sentiment_pipeline = pipeline(
-                "sentiment-analysis",
-                model="nlptown/bert-base-multilingual-uncased-sentiment"
-            )
-            self.hindi_sentiment_available = True
-        except Exception as e:
-            print(f"Warning: Hindi sentiment model not available: {e}")
+    # ── Core detection ────────────────────────────────────────────────────────
 
     def detect_language(self, text: str) -> str:
-        """
-        Detect language of text.
-
-        Args:
-            text: Input text
-
-        Returns:
-            Language code: 'en', 'hi', or 'hinglish'
-        """
-        if not self.language_detection_available or not text or not isinstance(text, str):
+        """Detect language code for a single message."""
+        if not text or not isinstance(text, str) or len(text.strip()) < 3:
             return 'unknown'
 
-        try:
-            lang = self.detect_language(text)
+        text_clean = _EMOJI_RE.sub('', text).strip()
+        if not text_clean:
+            return 'unknown'
 
-            if lang in ['hi', 'mr', 'pa']:
-                if any(char.isascii() for char in text):
+        dev_ratio = _devanagari_ratio(text_clean)
+        ara_ratio = _arabic_ratio(text_clean)
+
+        # Pure Devanagari
+        if dev_ratio > 0.5:
+            return 'hi'
+
+        # Mixed Devanagari + Roman  → Hinglish
+        if dev_ratio > 0.1:
+            return 'hinglish'
+
+        # Arabic script
+        if ara_ratio > 0.4:
+            return 'ar'
+
+        # Roman script: check Hinglish markers
+        h_score = _hinglish_score(text_clean)
+        if h_score >= 0.25:
+            return 'hinglish'
+
+        # Fallback: langdetect
+        if _LANGDETECT:
+            try:
+                lang = detect(text_clean)
+                if lang in ('hi', 'mr', 'pa', 'gu', 'bn'):
+                    return 'hi' if dev_ratio > 0.01 else 'hinglish'
+                if lang in ('ar', 'ur', 'fa'):
+                    return 'ar'
+                if lang == 'en':
+                    return 'en'
+                # For other langs with some Hinglish markers
+                if h_score >= 0.1:
                     return 'hinglish'
-                return 'hi'
+                return 'en'   # default roman → english
+            except Exception:
+                pass
 
-            return 'en'
-        except Exception as e:
-            print(f"Warning: Language detection failed: {e}")
-            return 'unknown'
+        if h_score >= 0.1:
+            return 'hinglish'
+        return 'en'
 
     def is_hinglish(self, text: str) -> bool:
-        """Check if text is Hinglish (mix of Hindi and English)"""
-        if not text or not isinstance(text, str):
-            return False
+        return self.detect_language(text) == 'hinglish'
 
-        devanagari_chars = sum(1 for c in text if '\u0900' <= c <= '\u097F')
-        ascii_chars = sum(1 for c in text if ord(c) < 128)
+    def get_language_label(self, code: str) -> str:
+        return _LANG_LABELS.get(code, code)
 
-        return devanagari_chars > 0 and ascii_chars > 0
+    def get_language_flag(self, code: str) -> str:
+        return _LANG_FLAGS.get(code, '🌐')
 
-    def transliterate_hindi_to_english(self, text: str) -> str:
-        """
-        Simple Hindi to English transliteration.
-        Maps Devanagari to phonetic English.
-        """
-        devanagari_to_english = {
-            'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo',
-            'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au', 'अँ': 'an', 'अः': 'ah',
-            'क': 'ka', 'ख': 'kha', 'ग': 'ga', 'घ': 'gha', 'ङ': 'nga',
-            'च': 'cha', 'छ': 'chha', 'ज': 'ja', 'झ': 'jha', 'ञ': 'nya',
-            'ट': 'ta', 'ठ': 'tha', 'ड': 'da', 'ढ': 'dha', 'ण': 'na',
-            'त': 'ta', 'थ': 'tha', 'द': 'da', 'ध': 'dha', 'न': 'na',
-            'प': 'pa', 'फ': 'pha', 'ब': 'ba', 'भ': 'bha', 'म': 'ma',
-            'य': 'ya', 'र': 'ra', 'ल': 'la', 'व': 'va',
-            'श': 'sha', 'ष': 'sha', 'स': 'sa', 'ह': 'ha',
-            'ज्ञ': 'gya', 'त्र': 'tra', 'क्ष': 'ksha',
-        }
-
-        result = ""
-        for char in text:
-            result += devanagari_to_english.get(char, char)
-
-        return result
-
-    def preprocess_multilingual(self, text: str) -> str:
-        """
-        Preprocess multilingual text.
-        Converts Hinglish to English for analysis.
-        """
-        if not text or not isinstance(text, str):
-            return ""
-
-        if self.is_hinglish(text):
-            text = self.transliterate_hindi_to_english(text)
-
-        return text.lower()
+    # ── DataFrame enrichment ──────────────────────────────────────────────────
 
     def analyze_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add language detection to dataframe.
-
-        Args:
-            df: DataFrame with messages
-
-        Returns:
-            DataFrame with language column
-        """
+        """Add language, emoji columns to dataframe."""
         df = df.copy()
+        msg_col = 'message_cleaned' if 'message_cleaned' in df.columns else 'message'
 
-        df['detected_language'] = df['message'].apply(self._safe_detect_language)
+        # Language detection (fast — no heavy model)
+        df['detected_language'] = df[msg_col].apply(
+            lambda x: self.detect_language(str(x)) if pd.notna(x) else 'unknown'
+        )
+        df['language_label'] = df['detected_language'].map(
+            lambda c: _LANG_LABELS.get(c, c)
+        )
+        df['language_flag'] = df['detected_language'].map(
+            lambda c: _LANG_FLAGS.get(c, '🌐')
+        )
+        df['is_hinglish'] = df['detected_language'] == 'hinglish'
 
-        df['is_hinglish'] = df['message'].apply(self.is_hinglish)
-
-        df['processed_message'] = df['message'].apply(self.preprocess_multilingual)
+        # Emoji extraction
+        raw_col = 'message' if 'message' in df.columns else msg_col
+        df['emojis'] = df[raw_col].apply(
+            lambda x: _extract_emojis(str(x)) if pd.notna(x) else []
+        )
+        df['emoji_count'] = df['emojis'].apply(len)
+        df['has_emoji']   = df['emoji_count'] > 0
 
         return df
 
-    def _safe_detect_language(self, text: str) -> str:
-        """Safely detect language with fallback"""
-        if not self.language_detection_available:
-            return 'unknown'
+    # ── Analytics helpers ─────────────────────────────────────────────────────
 
-        try:
-            from langdetect import detect
-
-            if not text or not isinstance(text, str):
-                return 'unknown'
-
-            lang = detect(text)
-
-            if lang in ['hi', 'mr', 'pa']:
-                if any(char.isascii() and ord(char) > 127 for char in text):
-                    return 'hinglish'
-                return lang
-
-            return 'en'
-        except Exception:
-            return 'unknown'
-
-    def get_language_distribution(self, df: pd.DataFrame) -> dict:
-        """Get distribution of languages in chat"""
+    def get_language_distribution(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Return DataFrame with language counts + percentages."""
         if 'detected_language' not in df.columns:
-            return {}
-
+            return pd.DataFrame()
         counts = df['detected_language'].value_counts()
-        total = len(df)
+        total  = len(df)
+        rows = []
+        for code, cnt in counts.items():
+            rows.append({
+                'code':       code,
+                'language':   _LANG_LABELS.get(code, code),
+                'flag':       _LANG_FLAGS.get(code, '🌐'),
+                'count':      int(cnt),
+                'percentage': round(cnt / total * 100, 1),
+            })
+        return pd.DataFrame(rows)
 
-        return {
-            lang: {
-                'count': count,
-                'percentage': round((count / total) * 100, 2)
-            }
-            for lang, count in counts.items()
-        }
+    def get_emoji_distribution(self, df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
+        """Top N emojis across all messages."""
+        if 'emojis' not in df.columns:
+            return pd.DataFrame()
+        all_em = [e for lst in df['emojis'] for e in lst]
+        counts = Counter(all_em).most_common(top_n)
+        return pd.DataFrame(counts, columns=['emoji', 'count'])
 
-    def get_hinglish_messages(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Get all Hinglish messages"""
-        if 'is_hinglish' not in df.columns:
-            return df[df['is_hinglish'] == True] if 'is_hinglish' in df.columns else pd.DataFrame()
+    def get_emoji_by_language(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Average emoji usage per language."""
+        if 'detected_language' not in df.columns or 'emoji_count' not in df.columns:
+            return pd.DataFrame()
+        return (
+            df.groupby('detected_language')['emoji_count']
+            .agg(['mean', 'sum', 'count'])
+            .rename(columns={'mean': 'avg_emojis', 'sum': 'total_emojis', 'count': 'messages'})
+            .round(2)
+            .reset_index()
+        )
 
-        return df[df['is_hinglish'] == True]
+    def get_user_language_mix(self, df: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
+        """Per-user language breakdown (%)."""
+        if 'detected_language' not in df.columns:
+            return pd.DataFrame()
+        top_users = df['user'].value_counts().head(top_n).index
+        sub = df[df['user'].isin(top_users)]
+        pivot = (
+            sub.groupby(['user', 'detected_language'])
+            .size()
+            .unstack(fill_value=0)
+        )
+        pct = pivot.div(pivot.sum(axis=1), axis=0).mul(100).round(1)
+        return pct.reset_index()
 
-    def get_language_sentiment_comparison(self, df: pd.DataFrame) -> dict:
-        """
-        Compare sentiment across languages.
-        """
-        if 'detected_language' not in df.columns or 'sentiment_compound' not in df.columns:
-            return {}
+    def get_language_sentiment_comparison(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Avg sentiment compound score per language."""
+        needed = {'detected_language', 'sentiment_compound'}
+        if not needed.issubset(df.columns):
+            return pd.DataFrame()
+        return (
+            df.groupby('detected_language')
+            .agg(
+                messages=('sentiment_compound', 'count'),
+                avg_sentiment=('sentiment_compound', 'mean'),
+                positive_pct=('sentiment_vader',
+                              lambda x: (x == 'POSITIVE').sum() / len(x) * 100
+                              if 'sentiment_vader' in df.columns else 0),
+            )
+            .round(3)
+            .reset_index()
+        )
 
-        comparison = {}
-
-        for lang in df['detected_language'].unique():
-            lang_df = df[df['detected_language'] == lang]
-
-            comparison[lang] = {
-                'message_count': len(lang_df),
-                'avg_sentiment': round(lang_df['sentiment_compound'].mean(), 3),
-                'avg_message_length': round(lang_df['message_length'].mean(), 2)
-            }
-
-        return comparison
+    def get_emoji_sentiment_correlation(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Messages with vs without emojis — sentiment difference."""
+        if 'has_emoji' not in df.columns or 'sentiment_compound' not in df.columns:
+            return pd.DataFrame()
+        return (
+            df.groupby('has_emoji')['sentiment_compound']
+            .agg(['mean', 'count'])
+            .rename(columns={'mean': 'avg_sentiment', 'count': 'messages'})
+            .round(3)
+            .reset_index()
+        )
