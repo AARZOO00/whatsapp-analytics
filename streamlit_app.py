@@ -2184,9 +2184,8 @@ else:
 
     # ── Tab 13: Multilingual & Emoji Analysis ────────────────────────────────
     with tab13:
-        import plotly.graph_objects as go
-        import plotly.express as px
         from collections import Counter
+        from src.modules.multilingual import _LANG_LABELS, _LANG_FLAGS, _EMOJI_RE
 
         _is_lt_ml = st.session_state.get('theme','light') == 'light'
         ac_ml   = '#B8883A' if _is_lt_ml else '#18C8E0'
@@ -2211,7 +2210,6 @@ else:
         )
 
         # ── Ensure multilingual columns exist ────────────────────────────────
-        from src.modules.multilingual import MultilingualAnalyzer
         ml_analyzer = MultilingualAnalyzer()
 
         if 'detected_language' not in df_filtered.columns or 'emojis' not in df_filtered.columns:
@@ -2220,7 +2218,6 @@ else:
         else:
             df_ml = df_filtered.copy()
             if 'emojis' not in df_ml.columns:
-                from src.modules.multilingual import _EMOJI_RE
                 raw = 'message' if 'message' in df_ml.columns else 'message_cleaned'
                 df_ml['emojis']      = df_ml[raw].apply(lambda x: _EMOJI_RE.findall(str(x)) if pd.notna(x) else [])
                 df_ml['emoji_count'] = df_ml['emojis'].apply(len)
@@ -2289,7 +2286,6 @@ else:
         user_lang = ml_analyzer.get_user_language_mix(df_ml, top_n=12)
         if not user_lang.empty:
             lang_cols = [c for c in user_lang.columns if c != 'user']
-            from src.modules.multilingual import _LANG_LABELS
             renamed = {c: _LANG_LABELS.get(c, c) for c in lang_cols}
             plot_df = user_lang.rename(columns=renamed)
             display_cols = [renamed[c] for c in lang_cols]
@@ -2323,7 +2319,6 @@ else:
         if not lang_sent.empty:
             c_s1, c_s2 = st.columns(2)
             with c_s1:
-                from src.modules.multilingual import _LANG_LABELS, _LANG_FLAGS
                 labels_display = [
                     f'{_LANG_FLAGS.get(r["detected_language"],"🌐")} {_LANG_LABELS.get(r["detected_language"], r["detected_language"])}'
                     for _, r in lang_sent.iterrows()
@@ -2539,7 +2534,6 @@ else:
         )
         if 'detected_language' in df_ml.columns:
             for code in df_ml['detected_language'].value_counts().head(4).index:
-                from src.modules.multilingual import _LANG_LABELS, _LANG_FLAGS
                 flag  = _LANG_FLAGS.get(code, '🌐')
                 label = _LANG_LABELS.get(code, code)
                 samples = df_ml[df_ml['detected_language'] == code].sample(
