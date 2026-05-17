@@ -1762,7 +1762,7 @@ if "df_cleaned" in st.session_state:
             Positive_pct=('sentiment_vader', lambda x:(x=='POSITIVE').sum()/len(x)*100),
             Negative_pct=('sentiment_vader', lambda x:(x=='NEGATIVE').sum()/len(x)*100),
             Avg_Msg_Length=('message_length','mean'),
-            Total_Emojis=(mc_ex, lambda x: x.fillna('').str.count(r'[\U0001F300-\U0001FFFF]').sum()),
+            Total_Emojis=(mc_ex, lambda x: x.fillna('').astype(str).apply(lambda s: len([c for c in s if '\U0001F300' <= c <= '\U0001FFFF'])).sum()),
         ).round(2).reset_index()
 
         daily_df = df_filtered.copy()
