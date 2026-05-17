@@ -372,9 +372,11 @@ if "df_cleaned" in st.session_state:
             unsafe_allow_html=True,
         )
 
-        if 'model_manager' not in st.session_state:
-            st.session_state.model_manager = ModelManager()
-        mm = st.session_state.model_manager
+        # Always create fresh - avoids stale cached object AttributeError
+        mm = ModelManager()
+        # Restore previous results if any
+        if 'mm_results' in st.session_state:
+            mm.results = st.session_state.mm_results
 
         selected_model = mm.render_model_selector()
         st.markdown('<br>', unsafe_allow_html=True)
@@ -383,6 +385,7 @@ if "df_cleaned" in st.session_state:
             with st.spinner(f'Analyzing {len(df_filtered):,} messages with {selected_model}...'):
                 df_analyzed, metrics = mm.analyze_with_model(df_filtered, selected_model)
             st.session_state[f'model_result_{selected_model}'] = (df_analyzed, metrics)
+            st.session_state.mm_results = mm.results
             st.success(f'✅ {selected_model} done in {metrics["processing_time"]}s')
 
         # Show results if available
@@ -394,13 +397,13 @@ if "df_cleaned" in st.session_state:
             st.markdown('<br>', unsafe_allow_html=True)
 
             charts = mm.render_sentiment_charts(df_analyzed, selected_model)
-            if charts:
-                fig_pie, fig_bar, fig_time = charts
+            fig_pie, fig_bar, fig_time = charts
+            if fig_pie and fig_bar:
                 c1, c2 = st.columns(2)
                 with c1: st.plotly_chart(fig_pie, use_container_width=True)
                 with c2: st.plotly_chart(fig_bar, use_container_width=True)
-                if fig_time:
-                    st.plotly_chart(fig_time, use_container_width=True)
+            if fig_time:
+                st.plotly_chart(fig_time, use_container_width=True)
 
         # Cross-model comparison
         if len(mm.results) >= 2:
