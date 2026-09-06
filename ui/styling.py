@@ -135,11 +135,10 @@ input:focus, textarea:focus { border-color:var(--gold) !important; box-shadow:va
 
 /* ═══════════════════════════════════════════════════════════════
    LIGHT THEME — INLINE HTML CARD FIXES
-   Dark bg + light text cards se text invisible hota tha.
-   Ye CSS un sabko light bg aur dark text mein convert karta hai.
+   Converts dark backgrounds and light text into light backgrounds and dark text.
 ═══════════════════════════════════════════════════════════════ */
 
-/* Dark backgrounds ko light mein badlo */
+/* Convert dark backgrounds to light */
 [data-testid="stMarkdownContainer"] [style*="background:rgba(17,24,39"],
 [data-testid="stMarkdownContainer"] [style*="background: rgba(17,24,39"],
 [data-testid="stMarkdownContainer"] [style*="background:rgba(12,20,35"],
@@ -154,7 +153,7 @@ input:focus, textarea:focus { border-color:var(--gold) !important; box-shadow:va
     border-color: rgba(184,136,58,0.3) !important;
 }
 
-/* Light text colors ko dark mein badlo */
+/* Convert light text colors to dark */
 [data-testid="stMarkdownContainer"] [style*="color:#E2E8F0"] { color:#18120A !important; }
 [data-testid="stMarkdownContainer"] [style*="color:#CBD5E1"] { color:#2C1A0E !important; }
 [data-testid="stMarkdownContainer"] [style*="color:#94A3B8"] { color:#5C3D2E !important; }

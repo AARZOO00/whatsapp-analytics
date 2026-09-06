@@ -1401,25 +1401,25 @@ def roast_generator(df: pd.DataFrame) -> List[Dict]:
 
         # Volume
         if pct > 25:
-            lines.append(f"Responsible for {pct}% of messages — bhai, yeh group hai ya tera personal diary?")
+            lines.append(f"Responsible for {pct}% of messages — is this a group chat or a personal diary?")
         elif pct < 2:
             lines.append(f"Only {pct}% messages — read receipts ON, replies OFF. Classic lurker energy.")
 
         # Timing
         if hour >= 23 or hour < 3:
-            lines.append("Consistently active at 1am+ — bhai so ja, subah college/office hai.")
+            lines.append("Consistently active past 1:00 AM — sleep is definitely not on the priority list.")
         elif hour < 7:
-            lines.append("Most active at 6am — either bakery mein kaam karta hai ya neend nahi aati.")
+            lines.append("Most active at 6:00 AM — clearly an early bird who never sleeps in.")
 
         # Length
         if avg_len > 120:
-            lines.append(f"Average message: {int(avg_len)} characters. Bhai novel likh raha hai kya?")
+            lines.append(f"Average message: {int(avg_len)} characters — basically writing novels in chat.")
         elif avg_len < 8:
             lines.append("Average reply: less than 8 characters. 'ok', 'hm', 'k' — communication at its finest.")
 
         # Emojis
         if emojis > n * 2:
-            lines.append(f"Used {emojis} emojis — emoji keyboard ka sabse zyada istemaal.")
+            lines.append(f"Used {emojis} emojis — definitely maximizing usage of the emoji keyboard.")
 
         # Sentiment
         if pos / max(n,1) > 0.6:

@@ -2087,14 +2087,14 @@ if "df_cleaned" in st.session_state:
 
         st.markdown(
             f'<div style="font-size:22px;font-weight:800;color:{ac_ls};margin-bottom:4px;">🎭 Live Sentiment Analyzer</div>'
-            f'<div style="font-size:13px;color:{sc_ls};margin-bottom:24px;">Koi bhi message type karo — hum turant uska sentiment batayenge 💬</div>',
+            f'<div style="font-size:13px;color:{sc_ls};margin-bottom:24px;">Enter any message and instantly analyze its sentiment 💬</div>',
             unsafe_allow_html=True
         )
 
         # Input box
         live_msg = st.text_area(
-            "✍️ Apna message yahan likhein:",
-            placeholder="e.g. Yaar aaj bohot maza aaya! 😄  /  Mujhe kuch samajh nahi aa raha  /  I'm really happy today!",
+            "✍️ Enter your message here:",
+            placeholder="e.g. Loved the new project update! 😄  /  I am not sure about this direction  /  Truly an amazing experience!",
             height=120,
             key="live_sentiment_input"
         )
@@ -2123,17 +2123,17 @@ if "df_cleaned" in st.session_state:
                 emoji_icon = '😊'
                 sentiment_color = '#22C55E'
                 sentiment_bg    = 'rgba(34,197,94,0.10)'
-                sentiment_msg   = 'Positive — Yeh message khushi ya positivity dikhata hai!'
+                sentiment_msg   = 'Positive — This message expresses happiness, optimism, or positivity.'
             elif label == 'NEGATIVE':
                 emoji_icon = '😔'
                 sentiment_color = '#EF4444'
                 sentiment_bg    = 'rgba(239,68,68,0.10)'
-                sentiment_msg   = 'Negative — Yeh message dukh, gussa ya negativity dikhata hai.'
+                sentiment_msg   = 'Negative — This message expresses frustration, dissatisfaction, or negativity.'
             else:
                 emoji_icon = '😐'
                 sentiment_color = '#F59E0B'
                 sentiment_bg    = 'rgba(245,158,11,0.10)'
-                sentiment_msg   = 'Neutral — Yeh message zyada positive ya negative nahi hai.'
+                sentiment_msg   = 'Neutral — This message is matter-of-fact and largely neutral.'
 
             # ── Result card ──
             truncated_msg = live_msg[:120] + ("..." if len(live_msg) > 120 else "")
@@ -2206,19 +2206,19 @@ if "df_cleaned" in st.session_state:
             })
 
         elif analyze_btn and not live_msg.strip():
-            st.warning("⚠️ Pehle kuch message likhein, phir Analyze karein!")
+            st.warning("⚠️ Please enter a message first before analyzing.")
 
         # ── History table ──
         if st.session_state.get('live_history'):
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown(
-                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">🕓 Is Session Ki History</div>',
+                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">🕓 Session History</div>',
                 unsafe_allow_html=True
             )
             hist_df = pd.DataFrame(st.session_state['live_history'][::-1])
             st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
-            if st.button("🗑️ History Clear Karein", key="clear_history_btn"):
+            if st.button("🗑️ Clear History", key="clear_history_btn"):
                 st.session_state['live_history'] = []
                 st.rerun()
 
