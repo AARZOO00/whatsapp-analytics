@@ -235,9 +235,9 @@ class SentimentAnalyzer:
         compound = max(-1.0, min(1.0, compound + emoji_adj))
 
         # WhatsApp thresholds
-        if compound >= 0.1:
+        if compound >= 0.08:
             label = 'POSITIVE'
-        elif compound <= -0.15:
+        elif compound <= -0.08:
             label = 'NEGATIVE'
         else:
             label = 'NEUTRAL'

@@ -121,9 +121,73 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ── Live Sentiment model state initialization & sync ─────────────────────────
+LIVE_SENTIMENT_MODELS = [
+    'VADER (WhatsApp-Tuned)',
+    'Transformer (DistilBERT)',
+    'Multilingual BERT',
+    'Hybrid',
+]
+
+LIVE_MODEL_DESCRIPTIONS = {
+    'VADER (WhatsApp-Tuned)': 'Fastest option. Best for large chats, casual language and Hinglish.',
+    'Transformer (DistilBERT)': 'Context-aware English sentiment model. Slower but better semantic understanding.',
+    'Multilingual BERT': 'Designed for multilingual conversations including Hindi, Urdu, Arabic and English.',
+    'Hybrid': 'Combines fast VADER with transformer/contextual analysis for uncertain cases.',
+}
+
+LIVE_MODEL_ICONS = {
+    'VADER (WhatsApp-Tuned)': '⚡',
+    'Transformer (DistilBERT)': '🤖',
+    'Multilingual BERT': '🌐',
+    'Hybrid': '🔀',
+}
+
+LIVE_MODEL_BADGES = {
+    'VADER (WhatsApp-Tuned)': ('⚡ Very Fast', '#22C55E'),
+    'Transformer (DistilBERT)': ('🤖 Deep Context', '#818CF8'),
+    'Multilingual BERT': ('🌐 Multi-Language', '#EC4899'),
+    'Hybrid': ('🔀 Auto-Refining', '#F59E0B'),
+}
+
+if 'live_sentiment_model' not in st.session_state:
+    st.session_state['live_sentiment_model'] = 'VADER (WhatsApp-Tuned)'
+if 'sb_live_sentiment_model' not in st.session_state:
+    st.session_state['sb_live_sentiment_model'] = st.session_state['live_sentiment_model']
+if 'tab_live_sentiment_model' not in st.session_state:
+    st.session_state['tab_live_sentiment_model'] = st.session_state['live_sentiment_model']
+
+def _on_sb_model_change():
+    m = st.session_state.get('sb_live_sentiment_model', 'VADER (WhatsApp-Tuned)')
+    st.session_state['live_sentiment_model'] = m
+    st.session_state['tab_live_sentiment_model'] = m
+
+def _on_tab_model_change():
+    m = st.session_state.get('tab_live_sentiment_model', 'VADER (WhatsApp-Tuned)')
+    st.session_state['live_sentiment_model'] = m
+    st.session_state['sb_live_sentiment_model'] = m
+
 # ── Sidebar: theme selector + theme CSS (must run before any other rendering) ─
 with st.sidebar:
     render_theme_selector()   # sets st.session_state.theme & injects CSS
+
+    st.markdown("---")
+    st.markdown(
+        '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">🎭 Live Sentiment Model</div>',
+        unsafe_allow_html=True
+    )
+    _cur_sb_m = st.session_state.get('live_sentiment_model', 'VADER (WhatsApp-Tuned)')
+    _sb_i = LIVE_SENTIMENT_MODELS.index(_cur_sb_m) if _cur_sb_m in LIVE_SENTIMENT_MODELS else 0
+    st.selectbox(
+        "Live Sentiment Model",
+        LIVE_SENTIMENT_MODELS,
+        index=_sb_i,
+        key="sb_live_sentiment_model",
+        on_change=_on_sb_model_change,
+        help=LIVE_MODEL_DESCRIPTIONS.get(_cur_sb_m, "Choose model for Live Sentiment"),
+        label_visibility="collapsed"
+    )
+    st.caption(f"⚡ Default: VADER (Fast) · Active: **{_cur_sb_m}**")
 
     st.markdown("### 🚀 Quick Start")
 
@@ -489,6 +553,9 @@ if "df_cleaned" in st.session_state:
         _is_lt_m = st.session_state.get('theme','light') == 'light'
         ac_m  = '#B8883A' if _is_lt_m else '#18C8E0'
         sc_m  = '#6B5C3E' if _is_lt_m else '#94A3B8'
+        tc_m  = '#18120A' if _is_lt_m else '#E2E8F0'
+        card_bg_m  = '#FFFFFF' if _is_lt_m else 'rgba(17,24,39,0.75)'
+        card_bdr_m = 'rgba(184,136,58,0.22)' if _is_lt_m else 'rgba(24,163,183,0.14)'
 
         st.markdown(
             f'<div style="font-size:22px;font-weight:800;color:{ac_m};margin-bottom:4px;">🎛️ Sentiment Model Comparison</div>'
@@ -501,6 +568,30 @@ if "df_cleaned" in st.session_state:
         # Restore previous results if any
         if 'mm_results' in st.session_state:
             mm.results = st.session_state.mm_results
+
+        # Diagnostic Status Cards
+        m_status = mm.get_models_status()
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{ac_m};margin-bottom:8px;">🚦 Model Engine Status</div>',
+            unsafe_allow_html=True
+        )
+        st_cols = st.columns(4)
+        for col, (m_name, s_info) in zip(st_cols, m_status.items()):
+            m_icon = s_info['icon']
+            m_badge = s_info['badge']
+            m_color = '#22C55E' if s_info['available'] else '#EF4444'
+            col.markdown(
+                f'<div style="background:{card_bg_m};border:1px solid {card_bdr_m};border-top:3px solid {m_color};'
+                f'border-radius:10px;padding:10px 12px;margin-bottom:14px;">'
+                f'<div style="display:flex;align-items:center;justify-content:space-between;">'
+                f'<span style="font-size:11px;font-weight:700;color:{tc_m};">{m_name.split()[0]}</span>'
+                f'<span style="font-size:12px;">{m_icon}</span>'
+                f'</div>'
+                f'<div style="font-size:10px;color:{m_color};font-weight:700;margin-top:3px;">{m_badge}</div>'
+                f'<div style="font-size:9px;color:{sc_m};margin-top:2px;line-height:1.3;">{s_info["desc"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
 
         selected_model = mm.render_model_selector()
         st.markdown('<br>', unsafe_allow_html=True)
@@ -2087,19 +2178,65 @@ if "df_cleaned" in st.session_state:
 
         st.markdown(
             f'<div style="font-size:22px;font-weight:800;color:{ac_ls};margin-bottom:4px;">🎭 Live Sentiment Analyzer</div>'
-            f'<div style="font-size:13px;color:{sc_ls};margin-bottom:24px;">Enter any message and instantly analyze its sentiment 💬</div>',
+            f'<div style="font-size:13px;color:{sc_ls};margin-bottom:20px;">Enter any message and instantly analyze its sentiment with your choice of NLP model 💬</div>',
             unsafe_allow_html=True
         )
 
-        # Input box
+        # ── Model Selector & Comparison Toggle ──
+        col_m_sel, col_m_comp = st.columns([3, 2])
+        with col_m_sel:
+            st.markdown(
+                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;">🤖 Model</div>',
+                unsafe_allow_html=True
+            )
+            _cur_m = st.session_state.get('live_sentiment_model', 'VADER (WhatsApp-Tuned)')
+            _m_idx = LIVE_SENTIMENT_MODELS.index(_cur_m) if _cur_m in LIVE_SENTIMENT_MODELS else 0
+            selected_model = st.selectbox(
+                "Model",
+                LIVE_SENTIMENT_MODELS,
+                index=_m_idx,
+                key="tab_live_sentiment_model",
+                on_change=_on_tab_model_change,
+                label_visibility="collapsed"
+            )
+        with col_m_comp:
+            st.markdown(
+                f'<div style="font-size:12px;font-weight:700;color:{sc_ls};letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;">⚖️ Comparison Mode</div>',
+                unsafe_allow_html=True
+            )
+            compare_all = st.checkbox(
+                "Compare all models",
+                value=False,
+                key="live_compare_all_models",
+                help="Run all 4 models simultaneously side-by-side to compare latency, sentiment, and confidence."
+            )
+
+        # ── Model info banner ──
+        cur_tip = LIVE_MODEL_DESCRIPTIONS.get(selected_model, '')
+        cur_icon = LIVE_MODEL_ICONS.get(selected_model, '🎯')
+        badge_text, badge_color = LIVE_MODEL_BADGES.get(selected_model, ('Standard', ac_ls))
+        st.markdown(
+            f'<div style="background:{card_bg_ls};border:1px solid {card_bdr_ls};border-left:4px solid {badge_color};'
+            f'border-radius:10px;padding:10px 16px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<div>'
+            f'<div style="font-size:13px;font-weight:700;color:{tc_ls};">{cur_icon} {selected_model}</div>'
+            f'<div style="font-size:11px;color:{sc_ls};margin-top:2px;">{cur_tip}</div>'
+            f'</div>'
+            f'<span style="background:rgba(255,255,255,0.06);border:1px solid {badge_color};color:{badge_color};'
+            f'padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;white-space:nowrap;">{badge_text}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+        # ── Input box ──
         live_msg = st.text_area(
             "✍️ Enter your message here:",
-            placeholder="e.g. Loved the new project update! 😄  /  I am not sure about this direction  /  Truly an amazing experience!",
-            height=120,
+            placeholder="e.g. Loved the new project update! 😄  /  Well, at least you tried.  /  Great job, but you completely missed the point.",
+            height=110,
             key="live_sentiment_input"
         )
 
-        col_btn1, col_btn2 = st.columns([1, 4])
+        col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
         with col_btn1:
             analyze_btn = st.button("🔍 Analyze", use_container_width=True, key="analyze_live_btn")
         with col_btn2:
@@ -2109,101 +2246,245 @@ if "df_cleaned" in st.session_state:
             st.rerun()
 
         if analyze_btn and live_msg.strip():
-            sa_live = SentimentAnalyzer()
-            result  = sa_live.analyze_vader(live_msg.strip())
+            mm = ModelManager()
 
-            label    = result['label']
-            compound = result['compound']
-            pos      = result['positive']
-            neg      = result['negative']
-            neu      = result['neutral']
+            # ── Comparative Mode (All 4 Models) ──
+            if compare_all:
+                st.markdown(
+                    f'<div style="font-size:16px;font-weight:800;color:{ac_ls};margin-top:20px;margin-bottom:14px;">⚖️ Cross-Model Benchmark Comparison</div>',
+                    unsafe_allow_html=True
+                )
+                all_results = {}
+                for m in LIVE_SENTIMENT_MODELS:
+                    if m == 'Transformer (DistilBERT)':
+                        with st.spinner("🤖 Loading Transformer (DistilBERT) model..."):
+                            all_results[m] = mm.analyze_single_message(live_msg.strip(), m)
+                    elif m == 'Multilingual BERT':
+                        with st.spinner("🌐 Loading Multilingual BERT model..."):
+                            all_results[m] = mm.analyze_single_message(live_msg.strip(), m)
+                    elif m == 'Hybrid':
+                        with st.spinner("🔀 Running Hybrid pipeline..."):
+                            all_results[m] = mm.analyze_single_message(live_msg.strip(), m)
+                    else:
+                        all_results[m] = mm.analyze_single_message(live_msg.strip(), m)
 
-            # Emoji + color based on sentiment
-            if label == 'POSITIVE':
-                emoji_icon = '😊'
-                sentiment_color = '#22C55E'
-                sentiment_bg    = 'rgba(34,197,94,0.10)'
-                sentiment_msg   = 'Positive — This message expresses happiness, optimism, or positivity.'
-            elif label == 'NEGATIVE':
-                emoji_icon = '😔'
-                sentiment_color = '#EF4444'
-                sentiment_bg    = 'rgba(239,68,68,0.10)'
-                sentiment_msg   = 'Negative — This message expresses frustration, dissatisfaction, or negativity.'
+                cmp_cols = st.columns(4)
+                for col, m in zip(cmp_cols, LIVE_SENTIMENT_MODELS):
+                    r = all_results[m]
+                    m_icon = LIVE_MODEL_ICONS.get(m, '🎯')
+                    lbl = r['label']
+                    if lbl == 'POSITIVE':
+                        m_emo = '😊'
+                        m_col = '#22C55E'
+                        m_bg  = 'rgba(34,197,94,0.08)'
+                    elif lbl == 'NEGATIVE':
+                        m_emo = '😔'
+                        m_col = '#EF4444'
+                        m_bg  = 'rgba(239,68,68,0.08)'
+                    else:
+                        m_emo = '😐'
+                        m_col = '#F59E0B'
+                        m_bg  = 'rgba(245,158,11,0.08)'
+
+                    col.markdown(
+                        f'<div style="background:{m_bg};border:1.5px solid {m_col};border-top:4px solid {m_col};'
+                        f'border-radius:14px;padding:16px 14px;text-align:center;">'
+                        f'<div style="font-size:11px;font-weight:700;color:{sc_ls};letter-spacing:.08em;text-transform:uppercase;">{m_icon} {m}</div>'
+                        f'<div style="font-size:36px;margin:8px 0 2px 0;">{m_emo}</div>'
+                        f'<div style="font-size:18px;font-weight:800;color:{m_col};margin-bottom:4px;">{lbl}</div>'
+                        f'<div style="font-size:12px;color:{tc_ls};font-weight:600;">Score: <strong>{r["score"]}</strong></div>'
+                        f'<div style="font-size:11px;color:{sc_ls};margin-top:2px;">Confidence: <strong>{r["confidence"]}%</strong></div>'
+                        f'<div style="font-size:11px;color:{ac_ls};margin-top:6px;font-weight:700;">⏱️ {r["processing_time"]}s</div>'
+                        f'<div style="border-top:1px solid {card_bdr_ls};margin-top:10px;padding-top:8px;font-size:10px;color:{sc_ls};display:flex;justify-content:space-between;">'
+                        f'<span>Pos: {round(r["positive"]*100)}%</span><span>Neu: {round(r["neutral"]*100)}%</span><span>Neg: {round(r["negative"]*100)}%</span>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+                    if r.get('sarcasm'):
+                        col.caption(f"😏 {r['sarcasm']}")
+                    if r.get('fallback'):
+                        col.warning(r['fallback'])
+
+                cmp_table_data = []
+                for m in LIVE_SENTIMENT_MODELS:
+                    r = all_results[m]
+                    m_icon = LIVE_MODEL_ICONS.get(m, '🎯')
+                    cmp_table_data.append({
+                        'Model': f"{m_icon} {m}",
+                        'Sentiment': r['label'],
+                        'Compound Score': r['score'],
+                        'Confidence': f"{r['confidence']}%",
+                        'Processing Time': f"{r['processing_time']}s",
+                        'Positive %': f"{round(r['positive']*100, 1)}%",
+                        'Neutral %': f"{round(r['neutral']*100, 1)}%",
+                        'Negative %': f"{round(r['negative']*100, 1)}%",
+                    })
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.dataframe(pd.DataFrame(cmp_table_data), use_container_width=True, hide_index=True)
+
+                if 'live_history' not in st.session_state:
+                    st.session_state['live_history'] = []
+                st.session_state['live_history'].append({
+                    'Message': live_msg[:60] + ('...' if len(live_msg) > 60 else ''),
+                    'Model': f"All ({len(LIVE_SENTIMENT_MODELS)} models compared)",
+                    'Sentiment': f"Primary: {all_results[selected_model]['label']}",
+                    'Score': all_results[selected_model]['score'],
+                    'Confidence': f"{all_results[selected_model]['confidence']}%",
+                    'Latency': f"{sum(r['processing_time'] for r in all_results.values()):.3f}s total"
+                })
+
+            # ── Single Model Analysis ──
             else:
-                emoji_icon = '😐'
-                sentiment_color = '#F59E0B'
-                sentiment_bg    = 'rgba(245,158,11,0.10)'
-                sentiment_msg   = 'Neutral — This message is matter-of-fact and largely neutral.'
+                if selected_model == 'Transformer (DistilBERT)':
+                    with st.spinner("🤖 Loading Transformer (DistilBERT) model..."):
+                        result = mm.analyze_single_message(live_msg.strip(), selected_model)
+                elif selected_model == 'Multilingual BERT':
+                    with st.spinner("🌐 Loading Multilingual BERT model..."):
+                        result = mm.analyze_single_message(live_msg.strip(), selected_model)
+                elif selected_model == 'Hybrid':
+                    with st.spinner("🔀 Running Hybrid sentiment analysis..."):
+                        result = mm.analyze_single_message(live_msg.strip(), selected_model)
+                else:
+                    result = mm.analyze_single_message(live_msg.strip(), selected_model)
 
-            # ── Result card ──
-            truncated_msg = live_msg[:120] + ("..." if len(live_msg) > 120 else "")
-            st.markdown(
-                f'<div style="background:{sentiment_bg};border:2px solid {sentiment_color};'
-                f'border-radius:16px;padding:24px 28px;margin-top:16px;">'
-                f'<div style="font-size:40px;margin-bottom:8px;">{emoji_icon}</div>'
-                f'<div style="font-size:20px;font-weight:800;color:{sentiment_color};margin-bottom:6px;">{label}</div>'
-                f'<div style="font-size:13px;color:{tc_ls};margin-bottom:16px;">{sentiment_msg}</div>'
-                f'<div style="font-size:12px;color:{sc_ls};font-style:italic;border-top:1px solid {card_bdr_ls};padding-top:12px;">'
-                f'&ldquo;{truncated_msg}&rdquo;</div>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+                label    = result['label']
+                compound = result['compound']
+                score    = result['score']
+                conf     = result['confidence']
+                pos      = result['positive']
+                neg      = result['negative']
+                neu      = result['neutral']
+                elapsed  = result['processing_time']
+                sarcasm  = result.get('sarcasm')
+                fallback = result.get('fallback')
+                h_source = result.get('hybrid_source')
 
-            st.markdown("<br>", unsafe_allow_html=True)
+                if result.get('status') == 'Failed':
+                    st.error(f"❌ {selected_model} Execution Failed: {result.get('error')}")
 
-            # ── Score breakdown ──
-            st.markdown(
-                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px;">📊 Score Breakdown</div>',
-                unsafe_allow_html=True
-            )
+                if fallback:
+                    st.warning(f"⚠️ {fallback}")
 
-            c1, c2, c3, c4 = st.columns(4)
-            def _live_score_card(col, label_s, value, color, icon):
-                col.markdown(
-                    f'<div style="background:{card_bg_ls};border:1px solid {card_bdr_ls};border-top:3px solid {color};'
-                    f'border-radius:12px;padding:16px;text-align:center;">'
-                    f'<div style="font-size:22px;">{icon}</div>'
-                    f'<div style="font-size:20px;font-weight:800;color:{color};margin:4px 0;">{round(value, 3)}</div>'
-                    f'<div style="font-size:11px;color:{sc_ls};font-weight:600;">{label_s}</div>'
+                if sarcasm:
+                    st.info(f"😏 **Context / Sarcasm Notice**: {sarcasm}")
+
+                if h_source:
+                    st.caption(f"ℹ️ **Hybrid Decision Path**: {h_source}")
+
+                # Emoji + color based on sentiment
+                if label == 'POSITIVE':
+                    emoji_icon = '😊'
+                    sentiment_color = '#22C55E'
+                    sentiment_bg    = 'rgba(34,197,94,0.10)'
+                    sentiment_msg   = 'Positive — This message expresses happiness, optimism, or positivity.'
+                elif label == 'NEGATIVE':
+                    emoji_icon = '😔'
+                    sentiment_color = '#EF4444'
+                    sentiment_bg    = 'rgba(239,68,68,0.10)'
+                    sentiment_msg   = 'Negative — This message expresses frustration, dissatisfaction, or negativity.'
+                else:
+                    emoji_icon = '😐'
+                    sentiment_color = '#F59E0B'
+                    sentiment_bg    = 'rgba(245,158,11,0.10)'
+                    sentiment_msg   = 'Neutral — This message is matter-of-fact and largely neutral.'
+
+                # ── Result card matching recommended layout ──
+                truncated_msg = live_msg[:140] + ("..." if len(live_msg) > 140 else "")
+                pos_pct = round(pos * 100, 1)
+                neu_pct = round(neu * 100, 1)
+                neg_pct = round(neg * 100, 1)
+                model_status_label = "✅ Loaded (PyTorch CPU)" if ("BERT" in selected_model or "Transformer" in selected_model or "Hybrid" in selected_model) else "⚡ Active (Lexicon Engine)"
+
+                st.markdown(
+                    f'<div style="background:{card_bg_ls};border:1.5px solid {card_bdr_ls};border-top:4px solid {sentiment_color};'
+                    f'border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.06);padding:24px 28px;margin-top:16px;">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid {card_bdr_ls};padding-bottom:14px;margin-bottom:18px;">'
+                    f'<div>'
+                    f'<div style="font-size:11px;font-weight:700;color:{sc_ls};letter-spacing:.12em;text-transform:uppercase;">🤖 MODEL USED</div>'
+                    f'<div style="font-size:18px;font-weight:800;color:{ac_ls};margin-top:2px;">{cur_icon} {selected_model}</div>'
+                    f'<div style="font-size:11px;color:#22C55E;font-weight:700;margin-top:2px;">{model_status_label}</div>'
+                    f'</div>'
+                    f'<div style="text-align:right;">'
+                    f'<div style="font-size:11px;font-weight:700;color:{sc_ls};letter-spacing:.12em;text-transform:uppercase;">LATENCY</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{tc_ls};margin-top:2px;">⏱️ {elapsed}s</div>'
+                    f'</div>'
+                    f'</div>'
+                    f'<div style="display:flex;align-items:center;gap:18px;margin-bottom:16px;">'
+                    f'<div style="font-size:46px;">{emoji_icon}</div>'
+                    f'<div>'
+                    f'<div style="font-size:24px;font-weight:800;color:{sentiment_color};line-height:1.2;">{label}</div>'
+                    f'<div style="font-size:13px;color:{sc_ls};margin-top:2px;">{sentiment_msg}</div>'
+                    f'</div>'
+                    f'</div>'
+                    f'<div style="display:flex;flex-wrap:wrap;gap:24px;margin-bottom:18px;padding:12px 18px;background:{sentiment_bg};border-radius:10px;">'
+                    f'<div><span style="font-size:11px;color:{sc_ls};font-weight:700;text-transform:uppercase;">Score:</span> <strong style="font-size:15px;color:{tc_ls};">{score}</strong></div>'
+                    f'<div><span style="font-size:11px;color:{sc_ls};font-weight:700;text-transform:uppercase;">Confidence:</span> <strong style="font-size:15px;color:{tc_ls};">{conf}%</strong></div>'
+                    f'<div><span style="font-size:11px;color:#22C55E;font-weight:700;text-transform:uppercase;">Positive:</span> <strong style="font-size:15px;color:#22C55E;">{pos_pct}%</strong></div>'
+                    f'<div><span style="font-size:11px;color:#F59E0B;font-weight:700;text-transform:uppercase;">Neutral:</span> <strong style="font-size:15px;color:#F59E0B;">{neu_pct}%</strong></div>'
+                    f'<div><span style="font-size:11px;color:#EF4444;font-weight:700;text-transform:uppercase;">Negative:</span> <strong style="font-size:15px;color:#EF4444;">{neg_pct}%</strong></div>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:{sc_ls};font-style:italic;border-top:1px solid {card_bdr_ls};padding-top:12px;">'
+                    f'&ldquo;{truncated_msg}&rdquo;</div>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
 
-            _live_score_card(c1, "Compound",  compound, sentiment_color, '🎯')
-            _live_score_card(c2, "Positive",  pos,      '#22C55E',        '😊')
-            _live_score_card(c3, "Negative",  neg,      '#EF4444',        '😔')
-            _live_score_card(c4, "Neutral",   neu,      '#F59E0B',        '😐')
+                st.markdown("<br>", unsafe_allow_html=True)
 
-            st.markdown("<br>", unsafe_allow_html=True)
+                # ── Score breakdown cards ──
+                st.markdown(
+                    f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px;">📊 Detailed Metric Cards</div>',
+                    unsafe_allow_html=True
+                )
 
-            # ── Visual bar ──
-            st.markdown(
-                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">📈 Visual Meter</div>',
-                unsafe_allow_html=True
-            )
-            pos_pct = round(pos * 100, 1)
-            neg_pct = round(neg * 100, 1)
-            neu_pct = round(neu * 100, 1)
-            st.markdown(
-                f'<div style="border-radius:8px;overflow:hidden;height:28px;display:flex;font-size:11px;font-weight:700;">'
-                f'<div style="width:{pos_pct}%;background:#22C55E;display:flex;align-items:center;justify-content:center;color:white;">'
-                f'{"😊 " + str(pos_pct) + "%" if pos_pct > 8 else ""}</div>'
-                f'<div style="width:{neu_pct}%;background:#F59E0B;display:flex;align-items:center;justify-content:center;color:white;">'
-                f'{"😐 " + str(neu_pct) + "%" if neu_pct > 8 else ""}</div>'
-                f'<div style="width:{neg_pct}%;background:#EF4444;display:flex;align-items:center;justify-content:center;color:white;">'
-                f'{"😔 " + str(neg_pct) + "%" if neg_pct > 8 else ""}</div>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+                c1, c2, c3, c4 = st.columns(4)
+                def _live_score_card(col, label_s, value, color, icon):
+                    col.markdown(
+                        f'<div style="background:{card_bg_ls};border:1px solid {card_bdr_ls};border-top:3px solid {color};'
+                        f'border-radius:12px;padding:16px;text-align:center;">'
+                        f'<div style="font-size:22px;">{icon}</div>'
+                        f'<div style="font-size:20px;font-weight:800;color:{color};margin:4px 0;">{round(value, 3)}</div>'
+                        f'<div style="font-size:11px;color:{sc_ls};font-weight:600;">{label_s}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
 
-            # ── History in session ──
-            if 'live_history' not in st.session_state:
-                st.session_state['live_history'] = []
-            st.session_state['live_history'].append({
-                'Message': live_msg[:60] + ('...' if len(live_msg) > 60 else ''),
-                'Sentiment': f"{emoji_icon} {label}",
-                'Score': round(compound, 3)
-            })
+                _live_score_card(c1, "Compound",  compound, sentiment_color, '🎯')
+                _live_score_card(c2, "Positive",  pos,      '#22C55E',        '😊')
+                _live_score_card(c3, "Negative",  neg,      '#EF4444',        '😔')
+                _live_score_card(c4, "Neutral",   neu,      '#F59E0B',        '😐')
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── Visual bar ──
+                st.markdown(
+                    f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">📈 Visual Meter</div>',
+                    unsafe_allow_html=True
+                )
+                st.markdown(
+                    f'<div style="border-radius:8px;overflow:hidden;height:28px;display:flex;font-size:11px;font-weight:700;">'
+                    f'<div style="width:{pos_pct}%;background:#22C55E;display:flex;align-items:center;justify-content:center;color:white;">'
+                    f'{"😊 " + str(pos_pct) + "%" if pos_pct > 8 else ""}</div>'
+                    f'<div style="width:{neu_pct}%;background:#F59E0B;display:flex;align-items:center;justify-content:center;color:white;">'
+                    f'{"😐 " + str(neu_pct) + "%" if neu_pct > 8 else ""}</div>'
+                    f'<div style="width:{neg_pct}%;background:#EF4444;display:flex;align-items:center;justify-content:center;color:white;">'
+                    f'{"😔 " + str(neg_pct) + "%" if neg_pct > 8 else ""}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+                # ── History in session ──
+                if 'live_history' not in st.session_state:
+                    st.session_state['live_history'] = []
+                st.session_state['live_history'].append({
+                    'Message': live_msg[:60] + ('...' if len(live_msg) > 60 else ''),
+                    'Model': f"{cur_icon} {selected_model}",
+                    'Sentiment': f"{emoji_icon} {label}",
+                    'Score': round(compound, 3),
+                    'Confidence': f"{conf}%",
+                    'Latency': f"{elapsed}s"
+                })
 
         elif analyze_btn and not live_msg.strip():
             st.warning("⚠️ Please enter a message first before analyzing.")

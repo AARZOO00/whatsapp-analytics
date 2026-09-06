@@ -1,12 +1,12 @@
 """
-model_manager.py — Proper VADER / Transformer / Multilingual / Hybrid comparison
+model_manager.py — Proper VADER / Transformer / Multilingual / Hybrid comparison engine
 """
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import time
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional, List, Any
 
 from src.modules.sentiment_analyzer import SentimentAnalyzer
 
@@ -22,34 +22,34 @@ _DARK_LAYOUT = dict(
 
 
 class ModelManager:
-    """Compare VADER, Transformer, Multilingual-BERT, Hybrid sentiment models."""
+    """Compare and execute VADER, Transformer, Multilingual-BERT, and Hybrid sentiment models."""
 
     MODEL_INFO = {
         'VADER (WhatsApp-Tuned)': {
-            'desc':  'Rule-based + Hinglish lexicon, emoji-aware. Fast, no GPU needed.',
-            'speed': '⚡ Very Fast',
-            'best':  'Large chats, Hinglish, casual text',
+            'desc':  'Rule-based + WhatsApp and Hinglish lexicons. Emoji-aware. Fast, lightweight CPU inference.',
+            'speed': '⚡ Very Fast (~1ms)',
+            'best':  'Large chats, Hinglish, casual conversation',
             'color': '#18A3B7',
             'icon':  '⚡',
         },
         'Transformer (DistilBERT)': {
-            'desc':  'DistilBERT fine-tuned on SST-2. Deep semantic understanding.',
-            'speed': '🐢 Slow (GPU helps)',
-            'best':  'Formal English text',
+            'desc':  'DistilBERT fine-tuned on SST-2 English sentiment. Deep semantic & contextual understanding.',
+            'speed': '🤖 Deep Context (~30ms)',
+            'best':  'English text, nuanced sentence structures',
             'color': '#818CF8',
             'icon':  '🤖',
         },
         'Multilingual BERT': {
-            'desc':  'nlptown/bert-base-multilingual — handles Hindi, Urdu, Arabic, English.',
-            'speed': '🐢 Slow',
-            'best':  'Multi-language chats',
+            'desc':  'nlptown/bert-base-multilingual-uncased-sentiment — handles Hindi, Urdu, Arabic, English, and more.',
+            'speed': '🌐 Multilingual (~60ms)',
+            'best':  'Multilingual & non-English chats',
             'color': '#F472B6',
             'icon':  '🌐',
         },
         'Hybrid': {
-            'desc':  'VADER for speed + Transformer for uncertain messages. Best accuracy.',
-            'speed': '🚀 Balanced',
-            'best':  'Production use — best of both worlds',
+            'desc':  'VADER fast path + Contextual Transformer refinement on uncertain or ambiguous messages.',
+            'speed': '🚀 Balanced & Accurate',
+            'best':  'Production analytics — speed + contextual precision',
             'color': '#FBBF24',
             'icon':  '🔀',
         },
@@ -58,33 +58,384 @@ class ModelManager:
     def __init__(self):
         self.results: Dict = {}
 
-    @st.cache_resource
-    def _get_vader(_self):
-        return SentimentAnalyzer()
+    @st.cache_resource(show_spinner=False)
+    def _get_vader(_self) -> Tuple[SentimentAnalyzer, Optional[str]]:
+        """Instantiate rule-based VADER analyzer."""
+        try:
+            return SentimentAnalyzer(), None
+        except Exception as e:
+            return None, f"VADER initialization error: {type(e).__name__}: {e}"
 
-    @st.cache_resource
-    def _get_transformer(_self):
+    @st.cache_resource(show_spinner=False)
+    def _get_transformer(_self) -> Tuple[Any, Optional[str]]:
+        """Load DistilBERT SST-2 sentiment pipeline."""
         try:
             from transformers import pipeline
-            return pipeline(
+            pipe = pipeline(
                 'sentiment-analysis',
                 model='distilbert-base-uncased-finetuned-sst-2-english',
-                truncation=True, max_length=512,
+                truncation=True,
+                max_length=512,
             )
-        except Exception:
-            return None
+            return pipe, None
+        except Exception as e:
+            return None, f"Transformer (DistilBERT) initialization error: {type(e).__name__}: {e}"
 
-    @st.cache_resource
-    def _get_multilingual(_self):
+    @st.cache_resource(show_spinner=False)
+    def _get_multilingual(_self) -> Tuple[Any, Optional[str]]:
+        """Load Multilingual BERT sentiment pipeline."""
         try:
             from transformers import pipeline
-            return pipeline(
+            pipe = pipeline(
                 'sentiment-analysis',
                 model='nlptown/bert-base-multilingual-uncased-sentiment',
-                truncation=True, max_length=512,
+                truncation=True,
+                max_length=512,
             )
-        except Exception:
-            return None
+            return pipe, None
+        except Exception as e:
+            return None, f"Multilingual BERT initialization error: {type(e).__name__}: {e}"
+
+    def get_models_status(self) -> Dict[str, Dict]:
+        """Check backend health and environment readiness for all models without heavy inference."""
+        status = {}
+        status['VADER (WhatsApp-Tuned)'] = {
+            'status': 'Ready',
+            'available': True,
+            'desc': 'In-Memory Rule-Based + Hinglish Lexicon',
+            'icon': '✅',
+            'badge': 'Ready (Fast CPU)',
+        }
+
+        try:
+            import torch
+            torch_ver = torch.__version__
+        except ImportError:
+            torch_ver = None
+
+        try:
+            import transformers
+            trans_ver = transformers.__version__
+        except ImportError:
+            trans_ver = None
+
+        if not torch_ver:
+            err = "PyTorch (torch) is not installed in the current environment."
+            status['Transformer (DistilBERT)'] = {'status': 'Unavailable', 'available': False, 'desc': err, 'icon': '❌', 'badge': 'Dependency Missing'}
+            status['Multilingual BERT'] = {'status': 'Unavailable', 'available': False, 'desc': err, 'icon': '❌', 'badge': 'Dependency Missing'}
+        elif not trans_ver:
+            err = "HuggingFace transformers is not installed in the current environment."
+            status['Transformer (DistilBERT)'] = {'status': 'Unavailable', 'available': False, 'desc': err, 'icon': '❌', 'badge': 'Dependency Missing'}
+            status['Multilingual BERT'] = {'status': 'Unavailable', 'available': False, 'desc': err, 'icon': '❌', 'badge': 'Dependency Missing'}
+        else:
+            status['Transformer (DistilBERT)'] = {
+                'status': 'Ready',
+                'available': True,
+                'desc': f'DistilBERT SST-2 (PyTorch {torch_ver} · CPU)',
+                'icon': '✅',
+                'badge': 'Ready (Deep Context)',
+            }
+            status['Multilingual BERT'] = {
+                'status': 'Ready',
+                'available': True,
+                'desc': f'nlptown BERT Multilingual (PyTorch {torch_ver} · CPU)',
+                'icon': '✅',
+                'badge': 'Ready (Multilingual)',
+            }
+
+        status['Hybrid'] = {
+            'status': 'Ready' if (torch_ver and trans_ver) else 'VADER-Only',
+            'available': True,
+            'desc': 'VADER Fast Path + Contextual Transformer on Ambiguous Messages',
+            'icon': '✅',
+            'badge': 'Ready (Auto-Refining)',
+        }
+        return status
+
+    @staticmethod
+    def detect_sarcasm_and_context(text: str, base_compound: float, base_label: str) -> Tuple[float, str, Optional[str]]:
+        """
+        Detects sarcasm, ironic emojis, and contrastive conjunctions.
+        """
+        t_lower = text.lower().strip()
+        sarcastic_emojis = {'🙄', '😒', '🙃', '😏', '🤨'}
+        has_sarcastic_emoji = any(e in text for e in sarcastic_emojis)
+
+        # 1. Emoji sarcasm contrast: Positive words with sarcastic emoji
+        if has_sarcastic_emoji and base_compound > 0.0:
+            adjusted_compound = -round(min(0.85, abs(base_compound) + 0.25), 4)
+            return adjusted_compound, 'NEGATIVE', 'Sarcasm detected (positive wording inverted by sarcastic emoji 🙄/😒)'
+
+        # 2. Contrastive conjunction: "..., but ...", "..., however ...", "... lekin ..."
+        contrast_markers = [' but ', ', but', ' however ', ' lekin ', ', lekin ', ' par ']
+        for marker in contrast_markers:
+            if marker in t_lower:
+                parts = t_lower.split(marker, 1)
+                second_clause = parts[1].strip()
+                crit_words = ['missed', 'wrong', 'fail', 'bad', 'poor', 'useless', 'late', 'point', 'galat', 'bekar', 'not']
+                if any(w in second_clause for w in crit_words):
+                    return -0.45, 'NEGATIVE', 'Contrastive context: positive opening negated by critical subsequent clause'
+
+        # 3. Backhanded / patronizing idioms
+        if 'at least you tried' in t_lower or 'atleast you tried' in t_lower:
+            return -0.35, 'NEGATIVE', 'Backhanded idiom detected ("at least you tried")'
+        if "this is a first" in t_lower and ("not late" in t_lower or "on time" in t_lower):
+            return 0.15, 'NEUTRAL', 'Mild sarcasm / backhanded compliment ("this is a first")'
+
+        return base_compound, base_label, None
+
+    def analyze_single_message(self, text: str, model: str, allow_fallback: bool = False) -> Dict:
+        """
+        Analyze a single message with the explicitly selected model.
+        Returns a rich metrics dictionary with confidence, probabilities, and context info.
+        Does NOT silently fall back to VADER unless allow_fallback=True is passed.
+        """
+        t0 = time.time()
+        clean_text = text.strip()
+        if not clean_text:
+            return {
+                'model': model,
+                'status': 'Ready',
+                'label': 'NEUTRAL',
+                'compound': 0.0,
+                'score': 0.0,
+                'confidence': 50.0,
+                'positive': 0.0,
+                'negative': 0.0,
+                'neutral': 1.0,
+                'processing_time': 0.0,
+                'sarcasm': None,
+                'hybrid_source': None,
+                'fallback': None,
+                'error': None,
+            }
+
+        fallback_notice = None
+        hybrid_source = None
+        error_msg = None
+        model_status = "Loaded"
+
+        if model == 'VADER (WhatsApp-Tuned)':
+            analyzer, _ = self._get_vader()
+            v_res = analyzer.analyze_vader(clean_text)
+            compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
+            pos = v_res['positive']
+            neg = v_res['negative']
+            neu = v_res['neutral']
+            if sarcasm and label == 'NEGATIVE':
+                neg = max(neg, 0.65)
+                pos = min(pos, 0.15)
+                neu = max(0.1, round(1.0 - (pos + neg), 3))
+            conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+
+        elif model == 'Transformer (DistilBERT)':
+            pipe, err = self._get_transformer()
+            if pipe is None:
+                error_msg = err or "Transformer (DistilBERT) model unavailable."
+                model_status = "Failed"
+                if allow_fallback:
+                    analyzer, _ = self._get_vader()
+                    v_res = analyzer.analyze_vader(clean_text)
+                    compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
+                    pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                    conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                    fallback_notice = f"Transformer unavailable ({error_msg}) — fallback to VADER executed."
+                else:
+                    return {
+                        'model': model,
+                        'status': 'Failed',
+                        'error': error_msg,
+                        'label': 'ERROR',
+                        'compound': 0.0,
+                        'score': 0.0,
+                        'confidence': 0.0,
+                        'positive': 0.0,
+                        'negative': 0.0,
+                        'neutral': 0.0,
+                        'processing_time': round(time.time() - t0, 4),
+                        'sarcasm': None,
+                        'hybrid_source': None,
+                        'fallback': None,
+                    }
+            else:
+                try:
+                    pred = pipe(clean_text[:512])[0]
+                    raw_lbl = pred['label'].upper()
+                    raw_sc = float(pred['score'])
+                    raw_comp = raw_sc if raw_lbl == 'POSITIVE' else -raw_sc
+                    raw_base_lbl = 'POSITIVE' if raw_comp > 0.05 else ('NEGATIVE' if raw_comp < -0.05 else 'NEUTRAL')
+                    compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, raw_comp, raw_base_lbl)
+                    pos = round(raw_sc if label == 'POSITIVE' else (1.0 - raw_sc), 3)
+                    neg = round(raw_sc if label == 'NEGATIVE' else (1.0 - raw_sc), 3)
+                    neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
+                    conf = round(raw_sc * 100, 1)
+                except Exception as e:
+                    error_msg = f"Inference error: {type(e).__name__}: {e}"
+                    model_status = "Failed"
+                    if allow_fallback:
+                        analyzer, _ = self._get_vader()
+                        v_res = analyzer.analyze_vader(clean_text)
+                        compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
+                        pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                        conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                        fallback_notice = f"Transformer error ({error_msg}) — fallback to VADER executed."
+                    else:
+                        return {
+                            'model': model,
+                            'status': 'Failed',
+                            'error': error_msg,
+                            'label': 'ERROR',
+                            'compound': 0.0,
+                            'score': 0.0,
+                            'confidence': 0.0,
+                            'positive': 0.0,
+                            'negative': 0.0,
+                            'neutral': 0.0,
+                            'processing_time': round(time.time() - t0, 4),
+                            'sarcasm': None,
+                            'hybrid_source': None,
+                            'fallback': None,
+                        }
+
+        elif model == 'Multilingual BERT':
+            pipe, err = self._get_multilingual()
+            if pipe is None:
+                error_msg = err or "Multilingual BERT model unavailable."
+                model_status = "Failed"
+                if allow_fallback:
+                    analyzer, _ = self._get_vader()
+                    v_res = analyzer.analyze_vader(clean_text)
+                    compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
+                    pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                    conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                    fallback_notice = f"Multilingual BERT unavailable ({error_msg}) — fallback to VADER executed."
+                else:
+                    return {
+                        'model': model,
+                        'status': 'Failed',
+                        'error': error_msg,
+                        'label': 'ERROR',
+                        'compound': 0.0,
+                        'score': 0.0,
+                        'confidence': 0.0,
+                        'positive': 0.0,
+                        'negative': 0.0,
+                        'neutral': 0.0,
+                        'processing_time': round(time.time() - t0, 4),
+                        'sarcasm': None,
+                        'hybrid_source': None,
+                        'fallback': None,
+                    }
+            else:
+                try:
+                    pred = pipe(clean_text[:512])[0]
+                    raw_lbl = str(pred['label']).lower()
+                    raw_sc = float(pred['score'])
+                    if 'star' in raw_lbl:
+                        stars = int(raw_lbl.split()[0])
+                        raw_comp = round((stars - 3.0) / 2.0, 4)
+                        raw_base_lbl = 'POSITIVE' if stars >= 4 else ('NEGATIVE' if stars <= 2 else 'NEUTRAL')
+                        compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, raw_comp, raw_base_lbl)
+                        pos = max(0.05, round(stars / 5.0 * raw_sc, 3))
+                        neg = max(0.05, round((6 - stars) / 5.0 * raw_sc, 3))
+                        neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.1
+                        conf = round(raw_sc * 100, 1)
+                    else:
+                        is_pos = 'pos' in raw_lbl
+                        raw_comp = raw_sc if is_pos else -raw_sc
+                        raw_base_lbl = 'POSITIVE' if is_pos else 'NEGATIVE'
+                        compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, raw_comp, raw_base_lbl)
+                        pos = round(raw_sc if is_pos else (1.0 - raw_sc), 3)
+                        neg = round(raw_sc if not is_pos else (1.0 - raw_sc), 3)
+                        neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
+                        conf = round(raw_sc * 100, 1)
+                except Exception as e:
+                    error_msg = f"Multilingual inference error: {type(e).__name__}: {e}"
+                    model_status = "Failed"
+                    if allow_fallback:
+                        analyzer, _ = self._get_vader()
+                        v_res = analyzer.analyze_vader(clean_text)
+                        compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
+                        pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                        conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                        fallback_notice = f"Multilingual BERT error ({error_msg}) — fallback to VADER executed."
+                    else:
+                        return {
+                            'model': model,
+                            'status': 'Failed',
+                            'error': error_msg,
+                            'label': 'ERROR',
+                            'compound': 0.0,
+                            'score': 0.0,
+                            'confidence': 0.0,
+                            'positive': 0.0,
+                            'negative': 0.0,
+                            'neutral': 0.0,
+                            'processing_time': round(time.time() - t0, 4),
+                            'sarcasm': None,
+                            'hybrid_source': None,
+                            'fallback': None,
+                        }
+
+        else:  # Hybrid
+            analyzer, _ = self._get_vader()
+            v_res = analyzer.analyze_vader(clean_text)
+            compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
+            pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+            conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+
+            # If uncertain/ambiguous in VADER and no emoji sarcasm, refine with deep Transformer
+            if abs(compound) < 0.25 and not sarcasm:
+                pipe, _ = self._get_transformer()
+                if pipe is None:
+                    pipe, _ = self._get_multilingual()
+
+                if pipe is not None:
+                    try:
+                        pred = pipe(clean_text[:512])[0]
+                        raw_lbl = str(pred['label']).lower()
+                        sc = float(pred['score'])
+                        if 'star' in raw_lbl:
+                            stars = int(raw_lbl.split()[0])
+                            compound = round((stars - 3.0) / 2.0, 4)
+                            label = 'POSITIVE' if stars >= 4 else ('NEGATIVE' if stars <= 2 else 'NEUTRAL')
+                            conf = round(sc * 100, 1)
+                            pos = max(0.05, round(stars / 5.0 * sc, 3))
+                            neg = max(0.05, round((6 - stars) / 5.0 * sc, 3))
+                            neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.1
+                        else:
+                            is_pos = 'pos' in raw_lbl
+                            compound = sc if is_pos else -sc
+                            label = 'POSITIVE' if compound > 0.05 else ('NEGATIVE' if compound < -0.05 else 'NEUTRAL')
+                            conf = round(sc * 100, 1)
+                            pos = round(sc if is_pos else (1.0 - sc), 3)
+                            neg = round(sc if not is_pos else (1.0 - sc), 3)
+                            neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
+                        hybrid_source = "Transformer (Contextual Refinement for Ambiguous Message)"
+                    except Exception:
+                        hybrid_source = "VADER (Standalone)"
+                else:
+                    hybrid_source = "VADER (Standalone — Transformer Unavailable)"
+            else:
+                hybrid_source = "VADER (High-Confidence Fast Path)"
+
+        elapsed = time.time() - t0
+        return {
+            'model': model,
+            'status': model_status,
+            'error': error_msg,
+            'label': label,
+            'compound': round(compound, 4),
+            'score': round(compound, 3),
+            'confidence': conf,
+            'positive': round(pos, 3),
+            'negative': round(neg, 3),
+            'neutral': round(neu, 3),
+            'processing_time': round(elapsed, 4),
+            'sarcasm': sarcasm,
+            'hybrid_source': hybrid_source,
+            'fallback': fallback_notice,
+        }
 
     # ── Model selector UI ─────────────────────────────────────────────────────
 
@@ -125,7 +476,7 @@ class ModelManager:
         )
         return selected
 
-    # ── Analysis runners ──────────────────────────────────────────────────────
+    # ── Analysis runners for DataFrames ────────────────────────────────────────
 
     def analyze_with_model(self, df: pd.DataFrame, model: str) -> Tuple[pd.DataFrame, Dict]:
         t0 = time.time()
@@ -134,72 +485,70 @@ class ModelManager:
         extra = {}
 
         if model == 'VADER (WhatsApp-Tuned)':
-            analyzer = self._get_vader()
+            analyzer, _ = self._get_vader()
             df_res = analyzer.analyze_dataframe(df_res, use_transformer=False)
             confidence = f"{df_res['sentiment_compound'].abs().mean():.3f}"
 
         elif model == 'Transformer (DistilBERT)':
-            pipe = self._get_transformer()
+            pipe, err = self._get_transformer()
             if pipe is None:
-                st.warning('⚠️ Transformer not available — falling back to VADER.')
-                analyzer = self._get_vader()
-                df_res = analyzer.analyze_dataframe(df_res, use_transformer=False)
-            else:
-                col = 'message_cleaned' if 'message_cleaned' in df_res.columns else 'message'
-                def _t_analyze(text):
-                    try:
-                        r = pipe(str(text)[:512])[0]
-                        label = 'POSITIVE' if r['label'] == 'POSITIVE' else 'NEGATIVE'
-                        score = r['score']
-                        compound = score if label == 'POSITIVE' else -score
-                        return label, round(compound, 4)
-                    except Exception:
-                        return 'NEUTRAL', 0.0
-                results = df_res[col].apply(_t_analyze)
-                df_res['sentiment_vader']    = results.apply(lambda x: x[0])
-                df_res['sentiment_compound'] = results.apply(lambda x: x[1])
+                raise RuntimeError(f"Transformer model unavailable: {err}")
+            col = 'message_cleaned' if 'message_cleaned' in df_res.columns else 'message'
+            def _t_analyze(text):
+                try:
+                    r = pipe(str(text)[:512])[0]
+                    lbl = 'POSITIVE' if r['label'].upper() == 'POSITIVE' else 'NEGATIVE'
+                    sc = float(r['score'])
+                    comp = sc if lbl == 'POSITIVE' else -sc
+                    return lbl, round(comp, 4)
+                except Exception:
+                    return 'NEUTRAL', 0.0
+            results = df_res[col].apply(_t_analyze)
+            df_res['sentiment_vader']    = results.apply(lambda x: x[0])
+            df_res['sentiment_compound'] = results.apply(lambda x: x[1])
             confidence = f"{df_res['sentiment_compound'].abs().mean():.3f}"
 
         elif model == 'Multilingual BERT':
-            pipe = self._get_multilingual()
+            pipe, err = self._get_multilingual()
             if pipe is None:
-                st.warning('⚠️ Multilingual model not available — falling back to VADER.')
-                analyzer = self._get_vader()
-                df_res = analyzer.analyze_dataframe(df_res, use_transformer=False)
-            else:
-                col = 'message_cleaned' if 'message_cleaned' in df_res.columns else 'message'
-                def _m_analyze(text):
-                    try:
-                        r = pipe(str(text)[:512])[0]
-                        # nlptown returns 1-5 stars
-                        label_raw = r['label']  # e.g. "4 stars"
-                        stars = int(label_raw.split()[0])
-                        compound = (stars - 3) / 2   # -1 to +1
-                        if stars >= 4:    label = 'POSITIVE'
-                        elif stars <= 2:  label = 'NEGATIVE'
-                        else:             label = 'NEUTRAL'
-                        return label, round(compound, 4)
-                    except Exception:
-                        return 'NEUTRAL', 0.0
-                results = df_res[col].apply(_m_analyze)
-                df_res['sentiment_vader']    = results.apply(lambda x: x[0])
-                df_res['sentiment_compound'] = results.apply(lambda x: x[1])
+                raise RuntimeError(f"Multilingual BERT model unavailable: {err}")
+            col = 'message_cleaned' if 'message_cleaned' in df_res.columns else 'message'
+            def _m_analyze(text):
+                try:
+                    r = pipe(str(text)[:512])[0]
+                    raw_lbl = str(r['label']).lower()
+                    if 'star' in raw_lbl:
+                        stars = int(raw_lbl.split()[0])
+                        compound = (stars - 3) / 2
+                        if stars >= 4:    lbl = 'POSITIVE'
+                        elif stars <= 2:  lbl = 'NEGATIVE'
+                        else:             lbl = 'NEUTRAL'
+                    else:
+                        is_pos = 'pos' in raw_lbl
+                        lbl = 'POSITIVE' if is_pos else 'NEGATIVE'
+                        sc = float(r['score'])
+                        compound = sc if is_pos else -sc
+                    return lbl, round(compound, 4)
+                except Exception:
+                    return 'NEUTRAL', 0.0
+            results = df_res[col].apply(_m_analyze)
+            df_res['sentiment_vader']    = results.apply(lambda x: x[0])
+            df_res['sentiment_compound'] = results.apply(lambda x: x[1])
             confidence = f"{df_res['sentiment_compound'].abs().mean():.3f}"
 
         else:  # Hybrid
-            analyzer = self._get_vader()
+            analyzer, _ = self._get_vader()
             df_res = analyzer.analyze_dataframe(df_res, use_transformer=False)
-            pipe = self._get_transformer()
+            pipe, _ = self._get_transformer()
             if pipe is not None:
-                # Only re-analyze messages where VADER is uncertain (compound near 0)
                 col = 'message_cleaned' if 'message_cleaned' in df_res.columns else 'message'
-                uncertain = df_res['sentiment_compound'].abs() < 0.2
+                uncertain = df_res['sentiment_compound'].abs() < 0.25
                 if uncertain.sum() > 0:
                     def _h(text):
                         try:
                             r = pipe(str(text)[:512])[0]
-                            lbl = 'POSITIVE' if r['label'] == 'POSITIVE' else 'NEGATIVE'
-                            sc  = r['score']
+                            lbl = 'POSITIVE' if r['label'].upper() == 'POSITIVE' else 'NEGATIVE'
+                            sc = float(r['score'])
                             return lbl, round(sc if lbl == 'POSITIVE' else -sc, 4)
                         except Exception:
                             return None, None
@@ -208,7 +557,7 @@ class ModelManager:
                         if lbl:
                             df_res.at[idx, 'sentiment_vader']    = lbl
                             df_res.at[idx, 'sentiment_compound'] = comp
-                extra['transformer_used'] = int(uncertain.sum())
+                extra['transformer_refinements'] = int(uncertain.sum())
             confidence = f"{df_res['sentiment_compound'].abs().mean():.3f}"
 
         elapsed = time.time() - t0
@@ -256,14 +605,13 @@ class ModelManager:
             )
 
     def render_sentiment_charts(self, df_res: pd.DataFrame, model_name: str):
-        """Render sentiment distribution + per-user chart. Always returns (fig_pie, fig_bar, fig_time|None)."""
+        """Render sentiment distribution + per-user chart."""
         if 'sentiment_vader' not in df_res.columns:
             return None, None, None
 
         colors = {'POSITIVE': '#4ADE80', 'NEGATIVE': '#F87171', 'NEUTRAL': '#FBBF24'}
         fill_colors = {'POSITIVE': 'rgba(74,222,128,0.15)', 'NEGATIVE': 'rgba(248,113,113,0.15)', 'NEUTRAL': 'rgba(251,191,36,0.15)'}
 
-        # Pie chart
         dist = df_res['sentiment_vader'].value_counts()
         fig_pie = go.Figure(go.Pie(
             labels=dist.index.tolist(),
@@ -278,7 +626,6 @@ class ModelManager:
             legend=dict(orientation='h', y=-0.1, font=dict(color='#94A3B8')),
         )
 
-        # Per-user stacked bar
         top_users = df_res['user'].value_counts().head(10).index
         sub = df_res[df_res['user'].isin(top_users)]
         pivot = sub.groupby(['user', 'sentiment_vader']).size().unstack(fill_value=0)
@@ -302,7 +649,6 @@ class ModelManager:
             **_DARK_LAYOUT,
         )
 
-        # Sentiment over time
         fig_time = None
         if 'datetime' in df_res.columns:
             try:
