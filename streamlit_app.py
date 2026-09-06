@@ -223,6 +223,59 @@ with st.sidebar:
                 prog.empty()
                 st.error(f"Error: {e}")
 
+    # ── Demo / Sample Chat option ─────────────────────────────────────────
+    st.markdown("<div style='text-align:center;color:#888;font-size:12px;margin:8px 0;'>— or —</div>", unsafe_allow_html=True)
+    if st.button("⚡ Load Demo Sample Chat", use_container_width=True, key="load_sample_btn"):
+        sample_path = "whatsapp-analyzer/data/raw/WhatsApp Chat with BTech CS Unofficial.txt"
+        prog = st.progress(0, text="Loading demo chat...")
+        try:
+            parser = WhatsAppParser()
+            import os
+            if os.path.exists(sample_path):
+                df = parser.parse_file(sample_path)
+            else:
+                sample_data = """12/05/2023, 10:15 - Alice: Hey everyone! How are you doing? 😂
+12/05/2023, 10:16 - Bob: Main theek hoon bhai, bohot badhiya!
+12/05/2023, 10:17 - Charlie: Kya chal raha hai? Bilkul mast.
+12/05/2023, 10:18 - Alice: Yeh project bohot zabardast ban gaya hai ❤️🔥
+12/05/2023, 10:19 - Bob: Shukriya! Sab log check karo.
+12/05/2023, 10:20 - Charlie: Haan bilkul sahi hai bro 👍
+12/05/2023, 10:21 - Alice: Awesome teamwork!
+"""
+                df = parser.parse_text(sample_data)
+
+            prog.progress(20, text="🧹 Cleaning data...")
+            cleaner = DataCleaner()
+            df_cleaned = cleaner.clean_dataframe(df)
+
+            prog.progress(45, text="💭 Sentiment analysis...")
+            sentiment_analyzer = SentimentAnalyzer()
+            df_cleaned = sentiment_analyzer.analyze_dataframe(df_cleaned, use_transformer=False)
+
+            prog.progress(65, text="🎭 Emotion detection...")
+            emotion_detector = EmotionDetector()
+            df_cleaned = emotion_detector.analyze_dataframe(df_cleaned)
+
+            prog.progress(80, text="📊 Behavioral analysis...")
+            behavioral_analyzer = BehavioralAnalyzer()
+            df_cleaned = behavioral_analyzer.analyze_dataframe(df_cleaned)
+
+            prog.progress(92, text="🌐 Multilingual check...")
+            multilingual_analyzer = MultilingualAnalyzer()
+            df_cleaned = multilingual_analyzer.analyze_dataframe(df_cleaned)
+
+            st.session_state.df_cleaned          = df_cleaned
+            st.session_state.sentiment_analyzer  = sentiment_analyzer
+            st.session_state.emotion_detector    = emotion_detector
+            st.session_state.behavioral_analyzer = behavioral_analyzer
+            st.session_state.file_name           = "BTech CS Unofficial (Sample).txt"
+            st.session_state._file_key           = "demo_sample_key"
+            prog.empty()
+            st.rerun()
+        except Exception as e:
+            prog.empty()
+            st.error(f"Error loading sample chat: {e}")
+
 # ── Main page header (hidden — shown in onboarding / dashboard) ──────────────
 render_gradient_divider()
 
