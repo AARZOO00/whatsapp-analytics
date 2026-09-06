@@ -155,32 +155,15 @@ class ModelManager:
     @staticmethod
     def detect_sarcasm_and_context(text: str, base_compound: float, base_label: str) -> Tuple[float, str, Optional[str]]:
         """
-        Detects sarcasm, ironic emojis, and contrastive conjunctions.
+        Detects sarcastic emojis for rule-based VADER only.
         """
-        t_lower = text.lower().strip()
         sarcastic_emojis = {'🙄', '😒', '🙃', '😏', '🤨'}
         has_sarcastic_emoji = any(e in text for e in sarcastic_emojis)
 
-        # 1. Emoji sarcasm contrast: Positive words with sarcastic emoji
+        # Emoji sarcasm contrast: Positive words with sarcastic emoji
         if has_sarcastic_emoji and base_compound > 0.0:
             adjusted_compound = -round(min(0.85, abs(base_compound) + 0.25), 4)
             return adjusted_compound, 'NEGATIVE', 'Sarcasm detected (positive wording inverted by sarcastic emoji 🙄/😒)'
-
-        # 2. Contrastive conjunction: "..., but ...", "..., however ...", "... lekin ..."
-        contrast_markers = [' but ', ', but', ' however ', ' lekin ', ', lekin ', ' par ']
-        for marker in contrast_markers:
-            if marker in t_lower:
-                parts = t_lower.split(marker, 1)
-                second_clause = parts[1].strip()
-                crit_words = ['missed', 'wrong', 'fail', 'bad', 'poor', 'useless', 'late', 'point', 'galat', 'bekar', 'not']
-                if any(w in second_clause for w in crit_words):
-                    return -0.45, 'NEGATIVE', 'Contrastive context: positive opening negated by critical subsequent clause'
-
-        # 3. Backhanded / patronizing idioms
-        if 'at least you tried' in t_lower or 'atleast you tried' in t_lower:
-            return -0.35, 'NEGATIVE', 'Backhanded idiom detected ("at least you tried")'
-        if "this is a first" in t_lower and ("not late" in t_lower or "on time" in t_lower):
-            return 0.15, 'NEUTRAL', 'Mild sarcasm / backhanded compliment ("this is a first")'
 
         return base_compound, base_label, None
 
@@ -188,7 +171,6 @@ class ModelManager:
         """
         Analyze a single message with the explicitly selected model.
         Returns a rich metrics dictionary with confidence, probabilities, and context info.
-        Does NOT silently fall back to VADER unless allow_fallback=True is passed.
         """
         t0 = time.time()
         clean_text = text.strip()
@@ -214,6 +196,7 @@ class ModelManager:
         hybrid_source = None
         error_msg = None
         model_status = "Loaded"
+        sarcasm = None
 
         if model == 'VADER (WhatsApp-Tuned)':
             analyzer, _ = self._get_vader()
@@ -225,8 +208,8 @@ class ModelManager:
             if sarcasm and label == 'NEGATIVE':
                 neg = max(neg, 0.65)
                 pos = min(pos, 0.15)
-                neu = max(0.1, round(1.0 - (pos + neg), 3))
-            conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                neu = max(0.05, round(1.0 - (pos + neg), 3))
+            conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
 
         elif model == 'Transformer (DistilBERT)':
             pipe, err = self._get_transformer()
@@ -238,7 +221,7 @@ class ModelManager:
                     v_res = analyzer.analyze_vader(clean_text)
                     compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
                     pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
-                    conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                    conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                     fallback_notice = f"Transformer unavailable ({error_msg}) — fallback to VADER executed."
                 else:
                     return {
@@ -262,12 +245,11 @@ class ModelManager:
                     pred = pipe(clean_text[:512])[0]
                     raw_lbl = pred['label'].upper()
                     raw_sc = float(pred['score'])
-                    raw_comp = raw_sc if raw_lbl == 'POSITIVE' else -raw_sc
-                    raw_base_lbl = 'POSITIVE' if raw_comp > 0.05 else ('NEGATIVE' if raw_comp < -0.05 else 'NEUTRAL')
-                    compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, raw_comp, raw_base_lbl)
-                    pos = round(raw_sc if label == 'POSITIVE' else (1.0 - raw_sc), 3)
-                    neg = round(raw_sc if label == 'NEGATIVE' else (1.0 - raw_sc), 3)
-                    neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
+                    label = raw_lbl
+                    compound = round(raw_sc if raw_lbl == 'POSITIVE' else -raw_sc, 4)
+                    pos = round(raw_sc if raw_lbl == 'POSITIVE' else (1.0 - raw_sc), 3)
+                    neg = round(raw_sc if raw_lbl == 'NEGATIVE' else (1.0 - raw_sc), 3)
+                    neu = max(0.01, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.01
                     conf = round(raw_sc * 100, 1)
                 except Exception as e:
                     error_msg = f"Inference error: {type(e).__name__}: {e}"
@@ -277,7 +259,7 @@ class ModelManager:
                         v_res = analyzer.analyze_vader(clean_text)
                         compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
                         pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
-                        conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                        conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                         fallback_notice = f"Transformer error ({error_msg}) — fallback to VADER executed."
                     else:
                         return {
@@ -307,7 +289,7 @@ class ModelManager:
                     v_res = analyzer.analyze_vader(clean_text)
                     compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
                     pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
-                    conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                    conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                     fallback_notice = f"Multilingual BERT unavailable ({error_msg}) — fallback to VADER executed."
                 else:
                     return {
@@ -333,21 +315,19 @@ class ModelManager:
                     raw_sc = float(pred['score'])
                     if 'star' in raw_lbl:
                         stars = int(raw_lbl.split()[0])
-                        raw_comp = round((stars - 3.0) / 2.0, 4)
-                        raw_base_lbl = 'POSITIVE' if stars >= 4 else ('NEGATIVE' if stars <= 2 else 'NEUTRAL')
-                        compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, raw_comp, raw_base_lbl)
-                        pos = max(0.05, round(stars / 5.0 * raw_sc, 3))
-                        neg = max(0.05, round((6 - stars) / 5.0 * raw_sc, 3))
-                        neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.1
+                        compound = round((stars - 3.0) / 2.0, 4)
+                        label = 'POSITIVE' if stars >= 4 else ('NEGATIVE' if stars <= 2 else 'NEUTRAL')
+                        pos = max(0.02, round(stars / 5.0 * raw_sc, 3))
+                        neg = max(0.02, round((6 - stars) / 5.0 * raw_sc, 3))
+                        neu = max(0.02, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
                         conf = round(raw_sc * 100, 1)
                     else:
                         is_pos = 'pos' in raw_lbl
-                        raw_comp = raw_sc if is_pos else -raw_sc
-                        raw_base_lbl = 'POSITIVE' if is_pos else 'NEGATIVE'
-                        compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, raw_comp, raw_base_lbl)
+                        compound = round(raw_sc if is_pos else -raw_sc, 4)
+                        label = 'POSITIVE' if is_pos else 'NEGATIVE'
                         pos = round(raw_sc if is_pos else (1.0 - raw_sc), 3)
                         neg = round(raw_sc if not is_pos else (1.0 - raw_sc), 3)
-                        neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
+                        neu = 0.02
                         conf = round(raw_sc * 100, 1)
                 except Exception as e:
                     error_msg = f"Multilingual inference error: {type(e).__name__}: {e}"
@@ -357,7 +337,7 @@ class ModelManager:
                         v_res = analyzer.analyze_vader(clean_text)
                         compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
                         pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
-                        conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
+                        conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                         fallback_notice = f"Multilingual BERT error ({error_msg}) — fallback to VADER executed."
                     else:
                         return {
@@ -380,12 +360,10 @@ class ModelManager:
         else:  # Hybrid
             analyzer, _ = self._get_vader()
             v_res = analyzer.analyze_vader(clean_text)
-            compound, label, sarcasm = self.detect_sarcasm_and_context(clean_text, v_res['compound'], v_res['label'])
-            pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
-            conf = min(99.0, max(52.0, round(abs(compound) * 60 + 40, 1)))
-
-            # If uncertain/ambiguous in VADER and no emoji sarcasm, refine with deep Transformer
-            if abs(compound) < 0.25 and not sarcasm:
+            v_comp = v_res['compound']
+            
+            # If ambiguous or low-confidence in VADER (|compound| < 0.35), refine with deep Transformer
+            if abs(v_comp) < 0.35:
                 pipe, _ = self._get_transformer()
                 if pipe is None:
                     pipe, _ = self._get_multilingual()
@@ -400,23 +378,36 @@ class ModelManager:
                             compound = round((stars - 3.0) / 2.0, 4)
                             label = 'POSITIVE' if stars >= 4 else ('NEGATIVE' if stars <= 2 else 'NEUTRAL')
                             conf = round(sc * 100, 1)
-                            pos = max(0.05, round(stars / 5.0 * sc, 3))
-                            neg = max(0.05, round((6 - stars) / 5.0 * sc, 3))
-                            neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.1
+                            pos = max(0.02, round(stars / 5.0 * sc, 3))
+                            neg = max(0.02, round((6 - stars) / 5.0 * sc, 3))
+                            neu = max(0.02, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
+                            hybrid_source = "Multilingual BERT (Refinement on Ambiguous Message)"
                         else:
                             is_pos = 'pos' in raw_lbl
-                            compound = sc if is_pos else -sc
-                            label = 'POSITIVE' if compound > 0.05 else ('NEGATIVE' if compound < -0.05 else 'NEUTRAL')
+                            compound = round(sc if is_pos else -sc, 4)
+                            label = 'POSITIVE' if is_pos else 'NEGATIVE'
                             conf = round(sc * 100, 1)
                             pos = round(sc if is_pos else (1.0 - sc), 3)
                             neg = round(sc if not is_pos else (1.0 - sc), 3)
-                            neu = max(0.05, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.05
-                        hybrid_source = "Transformer (Contextual Refinement for Ambiguous Message)"
+                            neu = max(0.01, round(1.0 - (pos + neg), 3)) if (pos + neg) < 1.0 else 0.01
+                            hybrid_source = "Transformer (Deep Context Refinement on Ambiguous Message)"
                     except Exception:
+                        compound = v_comp
+                        label = v_res['label']
+                        pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                        conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                         hybrid_source = "VADER (Standalone)"
                 else:
+                    compound = v_comp
+                    label = v_res['label']
+                    pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                    conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                     hybrid_source = "VADER (Standalone — Transformer Unavailable)"
             else:
+                compound = v_comp
+                label = v_res['label']
+                pos, neg, neu = v_res['positive'], v_res['negative'], v_res['neutral']
+                conf = min(99.0, max(50.0, round(abs(compound) * 60 + 40, 1)))
                 hybrid_source = "VADER (High-Confidence Fast Path)"
 
         elapsed = time.time() - t0
