@@ -1,13 +1,11 @@
 ---
-title: WhatsApp AI Analytics & Sentiment Analyzer
+title: WhatsApp Chat Sentiment Analyzer
 emoji: 💬
 colorFrom: yellow
 colorTo: blue
-sdk: gradio
-sdk_version: 4.44.0
-app_file: app.py
+sdk: docker
+app_port: 7860
 pinned: false
-license: mit
 ---
 
 # Advanced WhatsApp Sentiment Analyzer
