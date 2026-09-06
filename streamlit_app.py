@@ -1996,100 +1996,6 @@ if "df_cleaned" in st.session_state:
             unsafe_allow_html=True,
         )
 
-else:
-    # ── Beautiful onboarding screen ───────────────────────────────────────
-    _is_lt_ob = st.session_state.get('theme','light') == 'light'
-    hero_bg   = 'linear-gradient(135deg,#FFF8ED 0%,#FFF3DC 50%,#FFF8ED 100%)' if _is_lt_ob else 'linear-gradient(135deg,#07090F 0%,#0D1320 50%,#07090F 100%)'
-    card_bg   = '#FFFFFF' if _is_lt_ob else 'rgba(17,24,39,0.75)'
-    card_bdr  = 'rgba(184,136,58,0.25)' if _is_lt_ob else 'rgba(24,163,183,0.15)'
-    tc        = '#18120A' if _is_lt_ob else '#E2E8F0'
-    sc2       = '#7A6248' if _is_lt_ob else '#94A3B8'
-    ac        = '#B8883A' if _is_lt_ob else '#18A3B7'
-    ac2       = '#8B6820' if _is_lt_ob else '#6F71A1'
-
-    st.markdown(f"""
-    <div style="background:{hero_bg};border-radius:24px;padding:56px 40px;
-        text-align:center;margin:20px 0 40px;">
-        <div style="font-size:64px;margin-bottom:16px;">📊</div>
-        <div style="font-size:2.4rem;font-weight:800;color:{tc};
-            font-family:'Cormorant Garamond',serif;margin-bottom:10px;line-height:1.2;">
-            WhatsApp AI Analytics
-        </div>
-        <div style="font-size:1rem;color:{sc2};max-width:520px;margin:0 auto 28px;line-height:1.7;">
-            Uncover deep insights from your chats — sentiment, emotions,
-            personality types, reply patterns, and much more.
-        </div>
-        <div style="display:inline-flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-            <span style="background:{ac}22;color:{ac};border:1px solid {ac}44;
-                padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;">
-                ⚡ Instant Analysis
-            </span>
-            <span style="background:{ac2}22;color:{ac2};border:1px solid {ac2}44;
-                padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;">
-                🔒 100% Private
-            </span>
-            <span style="background:rgba(16,185,129,0.12);color:#10B981;border:1px solid rgba(16,185,129,0.3);
-                padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;">
-                🤖 AI Powered
-            </span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Feature grid
-    features = [
-        ("💬","Chat Explorer",    "Browse messages with media preview, links, and YouTube cards"),
-        ("😊","Sentiment AI",     "VADER + optional transformer — positive, negative, neutral"),
-        ("🎭","Emotions",         "Joy, anger, sadness, fear — per message emotion detection"),
-        ("🕸️","Network Graph",   "See who talks to whom most in the group"),
-        ("💑","Best Friends",     "Find the most interacting pairs automatically"),
-        ("🦉","Night Owls",       "Night owl vs early bird leaderboard"),
-        ("🎭","Personality Quiz", "Which type of group member is each person?"),
-        ("🔥","Roast Mode",       "Fun auto-generated roasts based on chat patterns 😄"),
-        ("⚡","Auto Summary",     "AI-like chat summary — no API key needed"),
-        ("🤖","AI Summary",       "Real AI summary via Claude, Gemini, or Groq"),
-        ("📄","PDF Export",       "Download a professional full report"),
-        ("🌙","Dark & Light",     "Beautiful themes — warm cream or deep navy"),
-    ]
-
-    cols_f = st.columns(3)
-    for i, (icon, title, desc) in enumerate(features):
-        with cols_f[i % 3]:
-            st.markdown(
-                f'<div style="background:{card_bg};border:1px solid {card_bdr};'
-                f'border-radius:14px;padding:18px 16px;margin-bottom:12px;height:110px;">'
-                f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
-                f'<span style="font-size:22px;">{icon}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:{tc};">{title}</span>'
-                f'</div>'
-                f'<div style="font-size:11px;color:{sc2};line-height:1.55;">{desc}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-    # How to export guide
-    st.markdown(f"""
-    <div style="background:{card_bg};border:1px solid {card_bdr};border-left:4px solid {ac};
-        border-radius:14px;padding:20px 24px;margin-top:10px;">
-        <div style="font-size:14px;font-weight:700;color:{ac};margin-bottom:12px;">
-            📱 How to Export WhatsApp Chat
-        </div>
-        <div style="display:flex;gap:24px;flex-wrap:wrap;">
-            <div style="flex:1;min-width:200px;">
-                <div style="font-size:12px;font-weight:600;color:{tc};margin-bottom:6px;">Android</div>
-                <div style="font-size:11px;color:{sc2};line-height:1.8;">
-                    Open chat → ⋮ Menu → More → Export Chat → Without Media → Share .txt file
-                </div>
-            </div>
-            <div style="flex:1;min-width:200px;">
-                <div style="font-size:12px;font-weight:600;color:{tc};margin-bottom:6px;">iPhone</div>
-                <div style="font-size:11px;color:{sc2};line-height:1.8;">
-                    Open chat → Contact/Group Name → Export Chat → Without Media → Share .txt file
-                </div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
     # ── Tab 12: Live Sentiment Analyzer ─────────────────────────────────────
     with tab12:
@@ -2616,3 +2522,99 @@ else:
                             f'</div>',
                             unsafe_allow_html=True,
                         )
+
+else:
+    # ── Beautiful onboarding screen ───────────────────────────────────────
+    _is_lt_ob = st.session_state.get('theme','light') == 'light'
+    hero_bg   = 'linear-gradient(135deg,#FFF8ED 0%,#FFF3DC 50%,#FFF8ED 100%)' if _is_lt_ob else 'linear-gradient(135deg,#07090F 0%,#0D1320 50%,#07090F 100%)'
+    card_bg   = '#FFFFFF' if _is_lt_ob else 'rgba(17,24,39,0.75)'
+    card_bdr  = 'rgba(184,136,58,0.25)' if _is_lt_ob else 'rgba(24,163,183,0.15)'
+    tc        = '#18120A' if _is_lt_ob else '#E2E8F0'
+    sc2       = '#7A6248' if _is_lt_ob else '#94A3B8'
+    ac        = '#B8883A' if _is_lt_ob else '#18A3B7'
+    ac2       = '#8B6820' if _is_lt_ob else '#6F71A1'
+
+    st.markdown(f"""
+    <div style="background:{hero_bg};border-radius:24px;padding:56px 40px;
+        text-align:center;margin:20px 0 40px;">
+        <div style="font-size:64px;margin-bottom:16px;">📊</div>
+        <div style="font-size:2.4rem;font-weight:800;color:{tc};
+            font-family:'Cormorant Garamond',serif;margin-bottom:10px;line-height:1.2;">
+            WhatsApp AI Analytics
+        </div>
+        <div style="font-size:1rem;color:{sc2};max-width:520px;margin:0 auto 28px;line-height:1.7;">
+            Uncover deep insights from your chats — sentiment, emotions,
+            personality types, reply patterns, and much more.
+        </div>
+        <div style="display:inline-flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+            <span style="background:{ac}22;color:{ac};border:1px solid {ac}44;
+                padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;">
+                ⚡ Instant Analysis
+            </span>
+            <span style="background:{ac2}22;color:{ac2};border:1px solid {ac2}44;
+                padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;">
+                🔒 100% Private
+            </span>
+            <span style="background:rgba(16,185,129,0.12);color:#10B981;border:1px solid rgba(16,185,129,0.3);
+                padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;">
+                🤖 AI Powered
+            </span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Feature grid
+    features = [
+        ("💬","Chat Explorer",    "Browse messages with media preview, links, and YouTube cards"),
+        ("😊","Sentiment AI",     "VADER + optional transformer — positive, negative, neutral"),
+        ("🎭","Emotions",         "Joy, anger, sadness, fear — per message emotion detection"),
+        ("🕸️","Network Graph",   "See who talks to whom most in the group"),
+        ("💑","Best Friends",     "Find the most interacting pairs automatically"),
+        ("🦉","Night Owls",       "Night owl vs early bird leaderboard"),
+        ("🎭","Personality Quiz", "Which type of group member is each person?"),
+        ("🔥","Roast Mode",       "Fun auto-generated roasts based on chat patterns 😄"),
+        ("⚡","Auto Summary",     "AI-like chat summary — no API key needed"),
+        ("🤖","AI Summary",       "Real AI summary via Claude, Gemini, or Groq"),
+        ("📄","PDF Export",       "Download a professional full report"),
+        ("🌙","Dark & Light",     "Beautiful themes — warm cream or deep navy"),
+    ]
+
+    cols_f = st.columns(3)
+    for i, (icon, title, desc) in enumerate(features):
+        with cols_f[i % 3]:
+            st.markdown(
+                f'<div style="background:{card_bg};border:1px solid {card_bdr};'
+                f'border-radius:14px;padding:18px 16px;margin-bottom:12px;height:110px;">'
+                f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
+                f'<span style="font-size:22px;">{icon}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:{tc};">{title}</span>'
+                f'</div>'
+                f'<div style="font-size:11px;color:{sc2};line-height:1.55;">{desc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # How to export guide
+    st.markdown(f"""
+    <div style="background:{card_bg};border:1px solid {card_bdr};border-left:4px solid {ac};
+        border-radius:14px;padding:20px 24px;margin-top:10px;">
+        <div style="font-size:14px;font-weight:700;color:{ac};margin-bottom:12px;">
+            📱 How to Export WhatsApp Chat
+        </div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+                <div style="font-size:12px;font-weight:600;color:{tc};margin-bottom:6px;">Android</div>
+                <div style="font-size:11px;color:{sc2};line-height:1.8;">
+                    Open chat → ⋮ Menu → More → Export Chat → Without Media → Share .txt file
+                </div>
+            </div>
+            <div style="flex:1;min-width:200px;">
+                <div style="font-size:12px;font-weight:600;color:{tc};margin-bottom:6px;">iPhone</div>
+                <div style="font-size:11px;color:{sc2};line-height:1.8;">
+                    Open chat → Contact/Group Name → Export Chat → Without Media → Share .txt file
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
