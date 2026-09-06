@@ -3,8 +3,8 @@ title: WhatsApp Chat Sentiment Analyzer
 emoji: 💬
 colorFrom: yellow
 colorTo: blue
-sdk: streamlit
-app_file: streamlit_app.py
+sdk: gradio
+app_file: app.py
 pinned: false
 ---
 
