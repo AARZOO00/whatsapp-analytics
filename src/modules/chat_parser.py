@@ -56,6 +56,68 @@ class WhatsAppParser:
         self.messages = []
         self.errors = []
 
+    def parse_lines(self, lines: List[str]) -> pd.DataFrame:
+        """
+        Parse lines of WhatsApp text and return structured DataFrame.
+        """
+        if not lines:
+            return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
+
+        self.messages = []
+        self.errors = []
+        current_msg = None
+
+        for line_num, raw_line in enumerate(lines):
+            line = raw_line.replace('\u202f', ' ').replace('\xa0', ' ').replace('\u200e', '').replace('\u200f', '').strip('\r\n')
+            if not line:
+                continue
+
+            parsed, is_system_line = self._parse_line_with_mode(line)
+
+            if parsed:
+                if current_msg:
+                    self.messages.append(current_msg)
+                current_msg = parsed
+            else:
+                if current_msg and not current_msg.get('is_system', False):
+                    current_msg['message'] += '\n' + line.strip()
+                else:
+                    self.errors.append({
+                        'line_num': line_num + 1,
+                        'line': line,
+                        'reason': 'Could not parse line'
+                    })
+
+        if current_msg:
+            self.messages.append(current_msg)
+
+        if not self.messages:
+            return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
+
+        df = pd.DataFrame(self.messages)
+
+        try:
+            df['datetime'] = pd.to_datetime(df['datetime'], format='mixed', errors='coerce')
+        except Exception:
+            df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+
+        if df['datetime'].isna().any():
+            df['datetime'] = df['datetime'].ffill().bfill()
+            if df['datetime'].isna().any():
+                df['datetime'] = df['datetime'].fillna(pd.Timestamp.now())
+
+        return df
+
+    def parse_text(self, text: str) -> pd.DataFrame:
+        """Parse raw string content."""
+        if not text:
+            return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
+        return self.parse_lines(text.splitlines())
+
+    def parse_chat(self, text: str) -> pd.DataFrame:
+        """Alias for parse_text."""
+        return self.parse_text(text)
+
     def parse_file(self, file_path: str) -> pd.DataFrame:
         """
         Parse WhatsApp chat file and return DataFrame.
@@ -76,56 +138,7 @@ class WhatsAppParser:
         if not lines:
             return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
 
-        self.messages = []
-        self.errors = []
-        current_msg = None
-
-        # Clean zero-width / non-breaking space characters common in WhatsApp exports
-        for line_num, raw_line in enumerate(lines):
-            # Normalize hidden unicode characters (e.g. LTR marks, narrow no-break space)
-            line = raw_line.replace('\u202f', ' ').replace('\xa0', ' ').replace('\u200e', '').replace('\u200f', '').strip('\r\n')
-            if not line:
-                continue
-
-            parsed, is_system_line = self._parse_line_with_mode(line)
-
-            if parsed:
-                if current_msg:
-                    self.messages.append(current_msg)
-                current_msg = parsed
-            else:
-                # If it didn't match a new timestamp, it's either a multiline continuation or unparseable
-                if current_msg and not current_msg.get('is_system', False):
-                    # Append multiline text to previous message
-                    current_msg['message'] += '\n' + line.strip()
-                else:
-                    self.errors.append({
-                        'line_num': line_num + 1,
-                        'line': line,
-                        'reason': 'Could not parse line'
-                    })
-
-        if current_msg:
-            self.messages.append(current_msg)
-
-        if not self.messages:
-            return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
-
-        df = pd.DataFrame(self.messages)
-
-        # Fast datetime conversion with format='mixed' and fallback
-        try:
-            df['datetime'] = pd.to_datetime(df['datetime'], format='mixed', errors='coerce')
-        except Exception:
-            df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
-
-        # Fill any unparseable datetimes with forward-fill then backward-fill
-        if df['datetime'].isna().any():
-            df['datetime'] = df['datetime'].ffill().bfill()
-            if df['datetime'].isna().any():
-                df['datetime'] = df['datetime'].fillna(pd.Timestamp.now())
-
-        return df
+        return self.parse_lines(lines)
 
     def _parse_line_with_mode(self, line: str) -> Tuple[Optional[Dict], bool]:
         """
@@ -196,4 +209,8 @@ class WhatsAppParser:
             'media_messages': sum(1 for m in self.messages if m.get('is_media', False)),
             'unique_users': len(set(m['user'] for m in self.messages if not m.get('is_system', False)))
         }
+
+# Alias for backward compatibility
+ChatParser = WhatsAppParser
+
 
