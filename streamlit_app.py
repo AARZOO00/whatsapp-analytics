@@ -238,7 +238,7 @@ if "df_cleaned" in st.session_state:
 
     st.sidebar.info(f"Showing {len(df_filtered)} of {len(df_cleaned)} messages")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
         "📊 Dashboard",
         "🎛️ Models",
         "💬 Chat Explorer",
@@ -250,6 +250,8 @@ if "df_cleaned" in st.session_state:
         "🖼️ Media",
         "💾 Export",
         "⚙️ Settings",
+        "🎭 Live Sentiment",
+        "🌐 Multilingual",
     ])
 
     # ── Tab 1: Dashboard ─────────────────────────────────────────────────────
@@ -405,43 +407,59 @@ if "df_cleaned" in st.session_state:
 
     # ── Tab 2: Models ────────────────────────────────────────────────────────
     with tab2:
-        st.header("Model Selection & Comparison")
-        model_manager = ModelManager()
-        selected_model = model_manager.render_model_selector()
+        _is_lt_m = st.session_state.get('theme','light') == 'light'
+        ac_m  = '#B8883A' if _is_lt_m else '#18C8E0'
+        sc_m  = '#6B5C3E' if _is_lt_m else '#94A3B8'
 
-        with st.spinner(f"Analyzing with {selected_model}..."):
-            df_analyzed, metrics = model_manager.analyze_with_model(df_filtered, selected_model)
+        st.markdown(
+            f'<div style="font-size:22px;font-weight:800;color:{ac_m};margin-bottom:4px;">🎛️ Sentiment Model Comparison</div>'
+            f'<div style="font-size:13px;color:{sc_m};margin-bottom:20px;">Run different models and compare accuracy, speed, and sentiment distribution.</div>',
+            unsafe_allow_html=True,
+        )
 
-        model_manager.render_model_metrics(metrics)
-        st.subheader("Model Comparison")
+        # Always create fresh - avoids stale cached object AttributeError
+        mm = ModelManager()
+        # Restore previous results if any
+        if 'mm_results' in st.session_state:
+            mm.results = st.session_state.mm_results
 
-        if len(model_manager.results) > 1:
-            comparison_df = model_manager.get_model_comparison(df_filtered)
-            st.dataframe(comparison_df, use_container_width=True)
+        selected_model = mm.render_model_selector()
+        st.markdown('<br>', unsafe_allow_html=True)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Processing Time")
-                times = {name: result["metrics"]["processing_time"] for name, result in model_manager.results.items()}
-                fig_times = go.Figure(go.Bar(
-                    x=list(times.keys()),
-                    y=list(times.values()),
-                    marker_color='#18A3B7',
-                    hovertemplate='%{x}: %{y:.3f}s<extra></extra>',
-                ))
-                fig_times.update_layout(
-                    height=280,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font=dict(family='Outfit, sans-serif'),
-                    margin=dict(l=10, r=10, t=10, b=20),
-                    yaxis_title='Seconds',
-                )
-                st.plotly_chart(fig_times, use_container_width=True)
+        if st.button(f'▶ Run {selected_model}', use_container_width=True, key='run_model_btn'):
+            with st.spinner(f'Analyzing {len(df_filtered):,} messages with {selected_model}...'):
+                df_analyzed, metrics = mm.analyze_with_model(df_filtered, selected_model)
+            st.session_state[f'model_result_{selected_model}'] = (df_analyzed, metrics)
+            st.session_state.mm_results = mm.results
+            st.success(f'✅ {selected_model} done in {metrics["processing_time"]}s')
 
-            with col2:
-                st.subheader("Model Confidence")
-                st.info("Lower processing time = VADER (rule-based)\nHigher processing time = Transformer (deep learning)")
+        # Show results if available
+        key = f'model_result_{selected_model}'
+        if key in st.session_state:
+            df_analyzed, metrics = st.session_state[key]
+            st.markdown('<br>', unsafe_allow_html=True)
+            mm.render_model_metrics(metrics)
+            st.markdown('<br>', unsafe_allow_html=True)
+
+            charts = mm.render_sentiment_charts(df_analyzed, selected_model)
+            fig_pie, fig_bar, fig_time = charts
+            if fig_pie and fig_bar:
+                c1, c2 = st.columns(2)
+                with c1: st.plotly_chart(fig_pie, use_container_width=True)
+                with c2: st.plotly_chart(fig_bar, use_container_width=True)
+            if fig_time:
+                st.plotly_chart(fig_time, use_container_width=True)
+
+        # Cross-model comparison
+        if len(mm.results) >= 2:
+            st.markdown(f'<div style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:{ac_m};margin:20px 0 10px;">📊 Model Comparison</div>', unsafe_allow_html=True)
+            cmp_df = mm.get_model_comparison(df_filtered)
+            st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+            cmp_charts = mm.render_comparison_charts()
+            if cmp_charts:
+                fig_cmp, fig_time_cmp = cmp_charts
+                st.plotly_chart(fig_cmp, use_container_width=True)
+                st.plotly_chart(fig_time_cmp, use_container_width=True)
 
     # ── Tab 3: Chat Explorer ─────────────────────────────────────────────────
     with tab3:
@@ -1831,6 +1849,7 @@ if "df_cleaned" in st.session_state:
             agg_kws['Negative_pct'] = ('sentiment_vader', lambda x: (x == 'NEGATIVE').sum() / max(len(x), 1) * 100)
         if 'message_length' in df_filtered.columns:
             agg_kws['Avg_Msg_Length'] = ('message_length', 'mean')
+        agg_kws['Total_Emojis'] = (mc_ex, lambda x: x.fillna('').astype(str).apply(lambda s: len([c for c in s if '\U0001F300' <= c <= '\U0001FFFF'])).sum())
 
         user_stats_df = df_filtered.groupby('user').agg(**agg_kws).round(2).reset_index() if 'user' in df_filtered.columns else pd.DataFrame()
 
@@ -2071,3 +2090,529 @@ else:
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Tab 12: Live Sentiment Analyzer ─────────────────────────────────────
+    with tab12:
+        _is_lt_ls = st.session_state.get('theme', 'light') == 'light'
+        ac_ls  = '#B8883A' if _is_lt_ls else '#18C8E0'
+        tc_ls  = '#18120A' if _is_lt_ls else '#E2E8F0'
+        sc_ls  = '#6B5C3E' if _is_lt_ls else '#94A3B8'
+        card_bg_ls  = '#FFFFFF' if _is_lt_ls else 'rgba(17,24,39,0.75)'
+        card_bdr_ls = 'rgba(184,136,58,0.22)' if _is_lt_ls else 'rgba(24,163,183,0.14)'
+
+        st.markdown(
+            f'<div style="font-size:22px;font-weight:800;color:{ac_ls};margin-bottom:4px;">🎭 Live Sentiment Analyzer</div>'
+            f'<div style="font-size:13px;color:{sc_ls};margin-bottom:24px;">Koi bhi message type karo — hum turant uska sentiment batayenge 💬</div>',
+            unsafe_allow_html=True
+        )
+
+        # Input box
+        live_msg = st.text_area(
+            "✍️ Apna message yahan likhein:",
+            placeholder="e.g. Yaar aaj bohot maza aaya! 😄  /  Mujhe kuch samajh nahi aa raha  /  I'm really happy today!",
+            height=120,
+            key="live_sentiment_input"
+        )
+
+        col_btn1, col_btn2 = st.columns([1, 4])
+        with col_btn1:
+            analyze_btn = st.button("🔍 Analyze", use_container_width=True, key="analyze_live_btn")
+        with col_btn2:
+            clear_btn = st.button("🗑️ Clear", use_container_width=True, key="clear_live_btn")
+
+        if clear_btn:
+            st.rerun()
+
+        if analyze_btn and live_msg.strip():
+            sa_live = SentimentAnalyzer()
+            result  = sa_live.analyze_vader(live_msg.strip())
+
+            label    = result['label']
+            compound = result['compound']
+            pos      = result['positive']
+            neg      = result['negative']
+            neu      = result['neutral']
+
+            # Emoji + color based on sentiment
+            if label == 'POSITIVE':
+                emoji_icon = '😊'
+                sentiment_color = '#22C55E'
+                sentiment_bg    = 'rgba(34,197,94,0.10)'
+                sentiment_msg   = 'Positive — Yeh message khushi ya positivity dikhata hai!'
+            elif label == 'NEGATIVE':
+                emoji_icon = '😔'
+                sentiment_color = '#EF4444'
+                sentiment_bg    = 'rgba(239,68,68,0.10)'
+                sentiment_msg   = 'Negative — Yeh message dukh, gussa ya negativity dikhata hai.'
+            else:
+                emoji_icon = '😐'
+                sentiment_color = '#F59E0B'
+                sentiment_bg    = 'rgba(245,158,11,0.10)'
+                sentiment_msg   = 'Neutral — Yeh message zyada positive ya negative nahi hai.'
+
+            # ── Result card ──
+            truncated_msg = live_msg[:120] + ("..." if len(live_msg) > 120 else "")
+            st.markdown(
+                f'<div style="background:{sentiment_bg};border:2px solid {sentiment_color};'
+                f'border-radius:16px;padding:24px 28px;margin-top:16px;">'
+                f'<div style="font-size:40px;margin-bottom:8px;">{emoji_icon}</div>'
+                f'<div style="font-size:20px;font-weight:800;color:{sentiment_color};margin-bottom:6px;">{label}</div>'
+                f'<div style="font-size:13px;color:{tc_ls};margin-bottom:16px;">{sentiment_msg}</div>'
+                f'<div style="font-size:12px;color:{sc_ls};font-style:italic;border-top:1px solid {card_bdr_ls};padding-top:12px;">'
+                f'&ldquo;{truncated_msg}&rdquo;</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Score breakdown ──
+            st.markdown(
+                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px;">📊 Score Breakdown</div>',
+                unsafe_allow_html=True
+            )
+
+            c1, c2, c3, c4 = st.columns(4)
+            def _live_score_card(col, label_s, value, color, icon):
+                col.markdown(
+                    f'<div style="background:{card_bg_ls};border:1px solid {card_bdr_ls};border-top:3px solid {color};'
+                    f'border-radius:12px;padding:16px;text-align:center;">'
+                    f'<div style="font-size:22px;">{icon}</div>'
+                    f'<div style="font-size:20px;font-weight:800;color:{color};margin:4px 0;">{round(value, 3)}</div>'
+                    f'<div style="font-size:11px;color:{sc_ls};font-weight:600;">{label_s}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            _live_score_card(c1, "Compound",  compound, sentiment_color, '🎯')
+            _live_score_card(c2, "Positive",  pos,      '#22C55E',        '😊')
+            _live_score_card(c3, "Negative",  neg,      '#EF4444',        '😔')
+            _live_score_card(c4, "Neutral",   neu,      '#F59E0B',        '😐')
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Visual bar ──
+            st.markdown(
+                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">📈 Visual Meter</div>',
+                unsafe_allow_html=True
+            )
+            pos_pct = round(pos * 100, 1)
+            neg_pct = round(neg * 100, 1)
+            neu_pct = round(neu * 100, 1)
+            st.markdown(
+                f'<div style="border-radius:8px;overflow:hidden;height:28px;display:flex;font-size:11px;font-weight:700;">'
+                f'<div style="width:{pos_pct}%;background:#22C55E;display:flex;align-items:center;justify-content:center;color:white;">'
+                f'{"😊 " + str(pos_pct) + "%" if pos_pct > 8 else ""}</div>'
+                f'<div style="width:{neu_pct}%;background:#F59E0B;display:flex;align-items:center;justify-content:center;color:white;">'
+                f'{"😐 " + str(neu_pct) + "%" if neu_pct > 8 else ""}</div>'
+                f'<div style="width:{neg_pct}%;background:#EF4444;display:flex;align-items:center;justify-content:center;color:white;">'
+                f'{"😔 " + str(neg_pct) + "%" if neg_pct > 8 else ""}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            # ── History in session ──
+            if 'live_history' not in st.session_state:
+                st.session_state['live_history'] = []
+            st.session_state['live_history'].append({
+                'Message': live_msg[:60] + ('...' if len(live_msg) > 60 else ''),
+                'Sentiment': f"{emoji_icon} {label}",
+                'Score': round(compound, 3)
+            })
+
+        elif analyze_btn and not live_msg.strip():
+            st.warning("⚠️ Pehle kuch message likhein, phir Analyze karein!")
+
+        # ── History table ──
+        if st.session_state.get('live_history'):
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="font-size:12px;font-weight:700;color:{ac_ls};letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;">🕓 Is Session Ki History</div>',
+                unsafe_allow_html=True
+            )
+            hist_df = pd.DataFrame(st.session_state['live_history'][::-1])
+            st.dataframe(hist_df, use_container_width=True, hide_index=True)
+
+            if st.button("🗑️ History Clear Karein", key="clear_history_btn"):
+                st.session_state['live_history'] = []
+                st.rerun()
+
+
+    # ── Tab 13: Multilingual & Emoji Analysis ────────────────────────────────
+    with tab13:
+        from collections import Counter
+        from src.modules.multilingual import _LANG_LABELS, _LANG_FLAGS, _EMOJI_RE
+
+        _is_lt_ml = st.session_state.get('theme','light') == 'light'
+        ac_ml   = '#B8883A' if _is_lt_ml else '#18C8E0'
+        tc_ml   = '#18120A' if _is_lt_ml else '#E2E8F0'
+        sc_ml   = '#6B5C3E' if _is_lt_ml else '#94A3B8'
+        bg_ml   = '#FFFFFF' if _is_lt_ml else 'rgba(17,24,39,0.75)'
+        bdr_ml  = 'rgba(184,136,58,0.22)' if _is_lt_ml else 'rgba(24,163,183,0.14)'
+        _DL = dict(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(17,24,39,0.5)',
+            font=dict(color='#94A3B8', family='Outfit, sans-serif', size=12),
+            margin=dict(t=60, b=50, l=50, r=30),
+            title_font=dict(color='#E2E8F0', size=15, family='Syne, sans-serif'),
+        )
+        _PAL = ['#18A3B7','#F472B6','#FBBF24','#818CF8','#4ADE80','#F87171','#34D399','#60A5FA']
+
+        st.markdown(
+            f'<div style="font-size:22px;font-weight:800;color:{ac_ml};margin-bottom:4px;">🌐 Multilingual & Emoji Analytics</div>'
+            f'<div style="font-size:13px;color:{sc_ml};margin-bottom:24px;">Language detection (English · Hindi · Hinglish · Arabic) + full emoji analytics with charts</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Ensure multilingual columns exist ────────────────────────────────
+        ml_analyzer = MultilingualAnalyzer()
+
+        if 'detected_language' not in df_filtered.columns or 'emojis' not in df_filtered.columns:
+            with st.spinner('🌐 Running multilingual analysis...'):
+                df_ml = ml_analyzer.analyze_dataframe(df_filtered)
+        else:
+            df_ml = df_filtered.copy()
+            if 'emojis' not in df_ml.columns:
+                raw = 'message' if 'message' in df_ml.columns else 'message_cleaned'
+                df_ml['emojis']      = df_ml[raw].apply(lambda x: _EMOJI_RE.findall(str(x)) if pd.notna(x) else [])
+                df_ml['emoji_count'] = df_ml['emojis'].apply(len)
+                df_ml['has_emoji']   = df_ml['emoji_count'] > 0
+
+        # ── Section 1: Language KPI Cards ────────────────────────────────────
+        lang_dist = ml_analyzer.get_language_distribution(df_ml)
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+            f'color:{ac_ml};margin-bottom:12px;">📊 Language Distribution</div>',
+            unsafe_allow_html=True,
+        )
+        if not lang_dist.empty:
+            kpi_cols = st.columns(min(len(lang_dist), 5))
+            for col_k, (_, row) in zip(kpi_cols, lang_dist.iterrows()):
+                col_k.markdown(
+                    f'<div style="background:{bg_ml};border:1px solid {bdr_ml};'
+                    f'border-radius:12px;padding:16px;text-align:center;">'
+                    f'<div style="font-size:28px;">{row["flag"]}</div>'
+                    f'<div style="font-size:20px;font-weight:800;color:{ac_ml};margin:4px 0;">{row["percentage"]}%</div>'
+                    f'<div style="font-size:12px;font-weight:700;color:{tc_ml};">{row["language"]}</div>'
+                    f'<div style="font-size:11px;color:{sc_ml};">{row["count"]:,} msgs</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown('<br>', unsafe_allow_html=True)
+
+            # ── Pie chart: language distribution ─────────────────────────────
+            c_pie, c_bar = st.columns(2)
+            with c_pie:
+                fig_lpie = go.Figure(go.Pie(
+                    labels=[r['language'] for _, r in lang_dist.iterrows()],
+                    values=[r['count']    for _, r in lang_dist.iterrows()],
+                    hole=0.52,
+                    marker=dict(colors=_PAL[:len(lang_dist)]),
+                    textfont=dict(size=13, color='#E2E8F0'),
+                ))
+                fig_lpie.update_layout(
+                    title='Language Mix in Chat', height=340, **_DL,
+                    legend=dict(orientation='h', y=-0.1, font=dict(color='#94A3B8')),
+                )
+                st.plotly_chart(fig_lpie, use_container_width=True)
+
+            with c_bar:
+                fig_lbar = go.Figure(go.Bar(
+                    x=[r['language'] for _, r in lang_dist.iterrows()],
+                    y=[r['percentage'] for _, r in lang_dist.iterrows()],
+                    marker=dict(color=_PAL[:len(lang_dist)]),
+                    text=[f"{r['percentage']}%" for _, r in lang_dist.iterrows()],
+                    textposition='outside',
+                    textfont=dict(color='#E2E8F0'),
+                ))
+                fig_lbar.update_layout(
+                    title='Language % Breakdown', height=340, **_DL,
+                    xaxis_title='', yaxis_title='% of Messages',
+                )
+                st.plotly_chart(fig_lbar, use_container_width=True)
+
+        # ── Section 2: Language per User heatmap ─────────────────────────────
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+            f'color:{ac_ml};margin:20px 0 12px;">👤 Language Mix per User</div>',
+            unsafe_allow_html=True,
+        )
+        user_lang = ml_analyzer.get_user_language_mix(df_ml, top_n=12)
+        if not user_lang.empty:
+            lang_cols = [c for c in user_lang.columns if c != 'user']
+            renamed = {c: _LANG_LABELS.get(c, c) for c in lang_cols}
+            plot_df = user_lang.rename(columns=renamed)
+            display_cols = [renamed[c] for c in lang_cols]
+
+            fig_heat = go.Figure(go.Heatmap(
+                z=[plot_df[col].tolist() for col in display_cols],
+                x=user_lang['user'].tolist(),
+                y=display_cols,
+                colorscale='Teal',
+                text=[[f'{v:.0f}%' for v in plot_df[col].tolist()] for col in display_cols],
+                texttemplate='%{text}',
+                textfont=dict(size=11),
+                hoverongaps=False,
+                colorbar=dict(tickfont=dict(color='#94A3B8')),
+            ))
+            fig_heat.update_layout(
+                title='Language Usage % per User (Top 12)',
+                height=300, **_DL,
+                xaxis=dict(tickangle=-30, tickfont=dict(size=10)),
+                yaxis=dict(tickfont=dict(size=11)),
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+
+        # ── Section 3: Language × Sentiment ──────────────────────────────────
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+            f'color:{ac_ml};margin:20px 0 12px;">💬 Sentiment by Language</div>',
+            unsafe_allow_html=True,
+        )
+        lang_sent = ml_analyzer.get_language_sentiment_comparison(df_ml)
+        if not lang_sent.empty:
+            c_s1, c_s2 = st.columns(2)
+            with c_s1:
+                labels_display = [
+                    f'{_LANG_FLAGS.get(r["detected_language"],"🌐")} {_LANG_LABELS.get(r["detected_language"], r["detected_language"])}'
+                    for _, r in lang_sent.iterrows()
+                ]
+                bar_colors = [
+                    '#4ADE80' if v >= 0.1 else ('#F87171' if v <= -0.1 else '#FBBF24')
+                    for v in lang_sent['avg_sentiment']
+                ]
+                fig_ls = go.Figure(go.Bar(
+                    x=labels_display,
+                    y=lang_sent['avg_sentiment'].tolist(),
+                    marker=dict(color=bar_colors),
+                    text=[f'{v:+.3f}' for v in lang_sent['avg_sentiment']],
+                    textposition='outside',
+                    textfont=dict(color='#E2E8F0'),
+                ))
+                fig_ls.update_layout(
+                    title='Avg Sentiment Score by Language', height=320, **_DL,
+                    xaxis_title='', yaxis_title='Compound Score',
+                )
+                st.plotly_chart(fig_ls, use_container_width=True)
+
+            with c_s2:
+                if 'positive_pct' in lang_sent.columns:
+                    fig_pp = go.Figure()
+                    fig_pp.add_trace(go.Bar(
+                        name='Positive', x=labels_display,
+                        y=lang_sent['positive_pct'].tolist(),
+                        marker_color='#4ADE80', opacity=0.88,
+                    ))
+                    fig_pp.update_layout(
+                        title='Positivity % by Language', height=320, **_DL,
+                        xaxis_title='', yaxis_title='%',
+                    )
+                    st.plotly_chart(fig_pp, use_container_width=True)
+
+        # ── Section 4: Emoji Analytics ────────────────────────────────────────
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+            f'color:{ac_ml};margin:24px 0 12px;">😂 Emoji Analytics</div>',
+            unsafe_allow_html=True,
+        )
+
+        all_emojis_flat = [e for lst in df_ml['emojis'] for e in lst]
+        total_emoji_count = len(all_emojis_flat)
+        unique_emoji_count = len(set(all_emojis_flat))
+        emoji_users = df_ml[df_ml['emoji_count'] > 0]['user'].value_counts()
+
+        # KPI row
+        ek1, ek2, ek3, ek4 = st.columns(4)
+        def _em_kpi(col, icon, val, label, color):
+            col.markdown(
+                f'<div style="background:{bg_ml};border:1px solid {bdr_ml};border-top:3px solid {color};'
+                f'border-radius:12px;padding:14px;text-align:center;">'
+                f'<div style="font-size:22px;">{icon}</div>'
+                f'<div style="font-size:20px;font-weight:800;color:{color};margin:4px 0;">{val}</div>'
+                f'<div style="font-size:10px;color:{sc_ml};font-weight:600;text-transform:uppercase;">{label}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        _em_kpi(ek1, '😂', f'{total_emoji_count:,}',  'Total Emojis',   '#FBBF24')
+        _em_kpi(ek2, '🎭', f'{unique_emoji_count:,}', 'Unique Emojis',  '#818CF8')
+        top_em_user = emoji_users.index[0] if len(emoji_users) > 0 else '—'
+        _em_kpi(ek3, '👑', top_em_user[:18],           'Emoji Champion', '#F472B6')
+        most_common_em = Counter(all_emojis_flat).most_common(1)
+        _em_kpi(ek4, most_common_em[0][0] if most_common_em else '❓',
+                str(most_common_em[0][1]) if most_common_em else '0',
+                'Most Used Emoji', '#18A3B7')
+
+        st.markdown('<br>', unsafe_allow_html=True)
+
+        if all_emojis_flat:
+            # Top emojis bar
+            top_em_df = ml_analyzer.get_emoji_distribution(df_ml, top_n=20)
+            c_e1, c_e2 = st.columns([3, 2])
+            with c_e1:
+                fig_em_bar = go.Figure(go.Bar(
+                    x=top_em_df['emoji'].tolist(),
+                    y=top_em_df['count'].tolist(),
+                    marker=dict(
+                        color=top_em_df['count'].tolist(),
+                        colorscale=[[0,'rgba(24,163,183,0.4)'], [1,'#F472B6']],
+                        showscale=False,
+                    ),
+                    text=top_em_df['count'].tolist(),
+                    textposition='outside',
+                    textfont=dict(color='#E2E8F0', size=13),
+                ))
+                fig_em_bar.update_layout(
+                    title='Top 20 Most Used Emojis', height=380, **_DL,
+                    xaxis_title='', yaxis_title='Usage Count',
+                    xaxis=dict(tickfont=dict(size=18)),
+                )
+                st.plotly_chart(fig_em_bar, use_container_width=True)
+
+            with c_e2:
+                top5_em = top_em_df.head(5)
+                fig_em_pie = go.Figure(go.Pie(
+                    labels=top5_em['emoji'].tolist(),
+                    values=top5_em['count'].tolist(),
+                    hole=0.5,
+                    marker=dict(colors=_PAL[:5]),
+                    textfont=dict(size=16),
+                ))
+                fig_em_pie.update_layout(
+                    title='Top 5 Emoji Share', height=380, **_DL,
+                    legend=dict(orientation='h', y=-0.12, font=dict(size=18, color='#E2E8F0')),
+                )
+                st.plotly_chart(fig_em_pie, use_container_width=True)
+
+            # Per-user emoji stacked bar (top 5 emojis × top 10 users)
+            top5_list = top_em_df['emoji'].head(5).tolist()
+            top_users = df_ml['user'].value_counts().head(10).index.tolist()
+            user_em_dict = {}
+            for _, row in df_ml.iterrows():
+                u = row['user']
+                if u not in user_em_dict:
+                    user_em_dict[u] = []
+                user_em_dict[u].extend(row['emojis'])
+
+            fig_eu = go.Figure()
+            for em, color in zip(top5_list, _PAL[:5]):
+                fig_eu.add_trace(go.Bar(
+                    name=em,
+                    x=top_users,
+                    y=[user_em_dict.get(u, []).count(em) for u in top_users],
+                    marker_color=color, opacity=0.88,
+                ))
+            fig_eu.update_layout(
+                title='Top 5 Emoji Usage per User (Top 10 Users)',
+                barmode='stack', height=380, **_DL,
+                xaxis_title='', yaxis_title='Count',
+                legend=dict(orientation='h', y=1.08, font=dict(color='#E2E8F0', size=16)),
+                xaxis=dict(tickangle=-20),
+            )
+            st.plotly_chart(fig_eu, use_container_width=True)
+
+            # Emoji by language
+            em_by_lang = ml_analyzer.get_emoji_by_language(df_ml)
+            if not em_by_lang.empty:
+                c_el1, c_el2 = st.columns(2)
+                with c_el1:
+                    lang_labels_em = [
+                        f'{_LANG_FLAGS.get(r["detected_language"],"🌐")} {_LANG_LABELS.get(r["detected_language"], r["detected_language"])}'
+                        for _, r in em_by_lang.iterrows()
+                    ]
+                    fig_el = go.Figure(go.Bar(
+                        x=lang_labels_em,
+                        y=em_by_lang['avg_emojis'].tolist(),
+                        marker=dict(color=_PAL[:len(em_by_lang)]),
+                        text=[f'{v:.2f}' for v in em_by_lang['avg_emojis']],
+                        textposition='outside',
+                        textfont=dict(color='#E2E8F0'),
+                    ))
+                    fig_el.update_layout(
+                        title='Avg Emojis per Message by Language',
+                        height=300, **_DL,
+                        xaxis_title='', yaxis_title='Avg Emojis',
+                    )
+                    st.plotly_chart(fig_el, use_container_width=True)
+
+                with c_el2:
+                    # Emoji vs sentiment correlation
+                    em_sent = ml_analyzer.get_emoji_sentiment_correlation(df_ml)
+                    if not em_sent.empty:
+                        labels_es = ['No Emoji 😐', 'Has Emoji 😊']
+                        colors_es = ['#F87171', '#4ADE80']
+                        fig_es = go.Figure(go.Bar(
+                            x=labels_es,
+                            y=em_sent['avg_sentiment'].tolist(),
+                            marker=dict(color=colors_es),
+                            text=[f'{v:+.3f}' for v in em_sent['avg_sentiment']],
+                            textposition='outside',
+                            textfont=dict(color='#E2E8F0'),
+                        ))
+                        fig_es.update_layout(
+                            title='Does Emoji = More Positive?',
+                            height=300, **_DL,
+                            xaxis_title='', yaxis_title='Avg Sentiment Score',
+                        )
+                        st.plotly_chart(fig_es, use_container_width=True)
+
+            # Emoji usage over time
+            if 'datetime' in df_ml.columns:
+                em_trend = (
+                    df_ml.set_index('datetime')
+                    .resample('D')['emoji_count']
+                    .sum()
+                    .reset_index()
+                )
+                fig_et = go.Figure(go.Scatter(
+                    x=em_trend['datetime'], y=em_trend['emoji_count'],
+                    mode='lines', name='Emojis/Day',
+                    line=dict(color='#F472B6', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(244,114,182,0.15)',
+                ))
+                fig_et.update_layout(
+                    title='Emoji Usage Over Time (Daily)',
+                    height=260, **_DL,
+                    xaxis_title='', yaxis_title='Emoji Count',
+                )
+                st.plotly_chart(fig_et, use_container_width=True)
+
+        else:
+            st.info('No emojis found in this chat.')
+
+        # ── Section 5: Sample messages by language ────────────────────────────
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+            f'color:{ac_ml};margin:24px 0 12px;">💬 Sample Messages by Language</div>',
+            unsafe_allow_html=True,
+        )
+        if 'detected_language' in df_ml.columns:
+            for code in df_ml['detected_language'].value_counts().head(4).index:
+                flag  = _LANG_FLAGS.get(code, '🌐')
+                label = _LANG_LABELS.get(code, code)
+                samples = df_ml[df_ml['detected_language'] == code].sample(
+                    min(3, (df_ml['detected_language'] == code).sum())
+                )
+                with st.expander(f'{flag} {label} — sample messages', expanded=False):
+                    for _, row in samples.iterrows():
+                        msg_col_s = 'message' if 'message' in row else 'message_cleaned'
+                        emojis_s  = ' '.join(row.get('emojis', []))
+                        sent_lbl  = row.get('sentiment_vader', '—')
+                        sent_col  = '#4ADE80' if sent_lbl == 'POSITIVE' else (
+                                    '#F87171' if sent_lbl == 'NEGATIVE' else '#FBBF24')
+                        emoji_html = f"<div style='font-size:16px;margin-top:6px;'>{emojis_s}</div>" if emojis_s else ""
+                        st.markdown(
+                            f'<div style="background:{bg_ml};border:1px solid {bdr_ml};'
+                            f'border-radius:10px;padding:12px 14px;margin-bottom:8px;">'
+                            f'<div style="font-size:12px;font-weight:700;color:{ac_ml};margin-bottom:4px;">'
+                            f'{row.get("user","—")}'
+                            f'<span style="font-size:10px;color:{sent_col};margin-left:10px;'
+                            f'background:{sent_col}22;padding:2px 8px;border-radius:8px;">'
+                            f'{sent_lbl}</span></div>'
+                            f'<div style="font-size:12px;color:{tc_ml};line-height:1.6;">{str(row[msg_col_s])[:200]}</div>'
+                            f'{emoji_html}'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
