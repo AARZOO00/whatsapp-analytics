@@ -86,6 +86,25 @@ class AdvancedExportSystem:
                 spaceAfter=12
             )
 
+            import re
+
+            def _clean(val, max_len=100):
+                if val is None:
+                    return ""
+                s = str(val)
+                s = re.sub(r'[\U00010000-\U0010ffff]', '', s)
+                s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', s)
+                return s.encode('latin-1', 'replace').decode('latin-1')[:max_len]
+
+            def _clean_p(val):
+                if val is None:
+                    return ""
+                s = str(val)
+                s = re.sub(r'[\U00010000-\U0010ffff]', '', s)
+                s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', s)
+                s = s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                return s.encode('latin-1', 'replace').decode('latin-1')
+
             elements.append(Paragraph("WhatsApp Sentiment Analysis Dashboard Report", title_style))
             elements.append(Spacer(1, 0.2*inch))
 
@@ -93,15 +112,18 @@ class AdvancedExportSystem:
             elements.append(Spacer(1, 0.3*inch))
 
             elements.append(Paragraph("Executive Summary", heading_style))
-            elements.append(Paragraph(summary.get('conversation_summary', 'N/A'), styles['Normal']))
+            elements.append(Paragraph(_clean_p(summary.get('conversation_summary', 'N/A')), styles['Normal']))
             elements.append(Spacer(1, 0.2*inch))
 
             elements.append(Paragraph("Key Metrics", heading_style))
+            min_dt = df['datetime'].min() if 'datetime' in df.columns else None
+            max_dt = df['datetime'].max() if 'datetime' in df.columns else None
+            d_str = f"{min_dt.date()} to {max_dt.date()}" if pd.notna(min_dt) and pd.notna(max_dt) else "N/A"
             metrics_data = [
                 ['Metric', 'Value'],
                 ['Total Messages', str(len(df))],
-                ['Unique Users', str(df['user'].nunique())],
-                ['Date Range', f"{df['datetime'].min().date()} to {df['datetime'].max().date()}"],
+                ['Unique Users', str(df['user'].nunique() if 'user' in df.columns else 0)],
+                ['Date Range', d_str],
             ]
 
             metrics_table = Table(metrics_data, colWidths=[3*inch, 3*inch])
@@ -123,7 +145,7 @@ class AdvancedExportSystem:
 
             for sentiment, stats in sentiment_dist.items():
                 sentiment_data.append([
-                    sentiment,
+                    _clean(sentiment),
                     str(stats.get('count', 0)),
                     f"{stats.get('percentage', 0):.2f}%"
                 ])
@@ -143,7 +165,7 @@ class AdvancedExportSystem:
 
             elements.append(Paragraph("Key Insights", heading_style))
             for insight in summary.get('key_insights', []):
-                elements.append(Paragraph(f"• {insight}", styles['Normal']))
+                elements.append(Paragraph(f"• {_clean_p(insight)}", styles['Normal']))
 
             doc.build(elements)
 
@@ -152,6 +174,9 @@ class AdvancedExportSystem:
 
         except ImportError:
             st.error("ReportLab not installed. Install with: pip install reportlab")
+            return None
+        except Exception as e:
+            st.error(f"Error creating PDF report: {e}")
             return None
 
     @staticmethod

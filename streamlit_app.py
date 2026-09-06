@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 
@@ -23,7 +24,7 @@ from ui.styling import (
 
 from models.model_manager import ModelManager
 from analytics.summary_generator import SummaryGenerator
-from analytics.ai_summary import generate_ai_summary, PROVIDERS, detect_provider
+from analytics.ai_summary import generate_ai_summary, PROVIDERS, detect_provider, get_space_secret_key
 from analytics.auto_summary import generate_auto_summary
 from analytics.advanced_viz import AdvancedVisualizations
 from analytics.deep_analysis import (
@@ -111,35 +112,79 @@ with st.sidebar:
         if st.session_state.get("_file_key") == file_key:
             st.success("✓ Analysis complete!")
         else:
-            # ── Handle ZIP file (With Media export) ──────────────────────
+            # ── Clean previous temp file if any ─────────────────────────
             import zipfile, io, os, tempfile
+            old_tmp = st.session_state.get("_uploaded_tmp_file")
+            if old_tmp and os.path.exists(old_tmp):
+                try:
+                    os.remove(old_tmp)
+                except Exception:
+                    pass
+
             media_files = {}  # filename → bytes
             txt_content = None
 
-            if uploaded_file.name.endswith(".zip"):
-                with zipfile.ZipFile(io.BytesIO(uploaded_file.read())) as zf:
-                    for name in zf.namelist():
-                        ext = os.path.splitext(name)[1].lower()
-                        if ext == ".txt":
-                            txt_content = zf.read(name).decode("utf-8", errors="ignore")
-                        elif ext in [".jpg",".jpeg",".png",".gif",".webp",
-                                     ".mp4",".mov",".avi",".mkv",
-                                     ".pdf",".opus",".aac",".m4a",".mp3"]:
-                            media_files[os.path.basename(name)] = zf.read(name)
-                # Save txt to temp file
+            if uploaded_file.name.lower().endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(io.BytesIO(uploaded_file.read())) as zf:
+                        # Zip bomb protection: limit total uncompressed content to 500MB
+                        total_uncompressed = sum(info.file_size for info in zf.infolist())
+                        if total_uncompressed > 500 * 1024 * 1024:
+                            st.error("⚠️ Uploaded ZIP archive exceeds maximum allowed uncompressed size (500 MB).")
+                            st.stop()
+
+                        for info in zf.infolist():
+                            # Path traversal security: ignore directories and parent traversal references
+                            raw_name = info.filename
+                            if raw_name.endswith('/') or raw_name.endswith('\\') or '..' in raw_name:
+                                continue
+                            clean_name = os.path.basename(raw_name.replace('\\', '/'))
+                            if not clean_name:
+                                continue
+
+                            ext = os.path.splitext(clean_name)[1].lower()
+                            if ext == ".txt":
+                                txt_content = zf.read(info).decode("utf-8", errors="ignore")
+                            elif ext in [".jpg",".jpeg",".png",".gif",".webp",
+                                         ".mp4",".mov",".avi",".mkv",
+                                         ".pdf",".opus",".aac",".m4a",".mp3"]:
+                                # Limit individual media file to 25MB to prevent container memory exhaustion
+                                if info.file_size <= 25 * 1024 * 1024:
+                                    media_files[clean_name] = zf.read(info)
+
+                    if not txt_content:
+                        st.error("❌ No `.txt` chat export file found inside the uploaded ZIP archive. Please make sure to export chat from WhatsApp and upload the zip directly.")
+                        st.stop()
+
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+                    tmp.write(txt_content)
+                    tmp.close()
+                    file_path = tmp.name
+                    st.session_state._uploaded_tmp_file = file_path
+                    st.session_state.media_files = media_files
+                    if media_files:
+                        img_count = sum(1 for f in media_files if f.lower().endswith(('.jpg','.jpeg','.png','.gif','.webp')))
+                        vid_count = sum(1 for f in media_files if f.lower().endswith(('.mp4','.mov','.avi')))
+                        aud_count = sum(1 for f in media_files if f.lower().endswith(('.mp3','.opus','.aac','.m4a')))
+                        st.success(f"📦 ZIP extracted! 🖼️ {img_count} images · 🎬 {vid_count} videos · 🎵 {aud_count} audio")
+                except zipfile.BadZipFile:
+                    st.error("❌ Corrupted or invalid ZIP file uploaded.")
+                    st.stop()
+            else:
+                # Direct .txt file upload - write to secure tempfile
+                content = uploaded_file.read()
+                try:
+                    txt_str = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    txt_str = content.decode("latin-1", errors="ignore")
+
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
-                tmp.write(txt_content or "")
+                tmp.write(txt_str)
                 tmp.close()
                 file_path = tmp.name
-                st.session_state.media_files = media_files
-                if media_files:
-                    img_count = sum(1 for f in media_files if f.lower().endswith(('.jpg','.jpeg','.png','.gif','.webp')))
-                    vid_count = sum(1 for f in media_files if f.lower().endswith(('.mp4','.mov','.avi')))
-                    aud_count = sum(1 for f in media_files if f.lower().endswith(('.mp3','.opus','.aac','.m4a')))
-                    st.success(f"📦 ZIP extracted! 🖼️ {img_count} images · 🎬 {vid_count} videos · 🎵 {aud_count} audio")
-            else:
-                file_path = save_uploaded_file(uploaded_file, "whatsapp-analyzer/data/raw")
+                st.session_state._uploaded_tmp_file = file_path
                 st.session_state.media_files = {}
+
             prog = st.progress(0, text="📂 Parsing chat...")
             try:
                 parser     = WhatsAppParser()
@@ -295,9 +340,16 @@ if "df_cleaned" in st.session_state:
         st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{_ac_d};margin-bottom:16px;">😂 Emoji Analytics</div>', unsafe_allow_html=True)
         import re as _re_em
         mc_em = 'message_cleaned' if 'message_cleaned' in df_filtered.columns else 'message'
+        _emoji_regex = _re_em.compile(r'[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf]')
         all_emojis = []
-        for txt in df_filtered[mc_em].fillna('').astype(str):
-            all_emojis.extend(_re_em.findall(r'[🌀-🿿☀-➿]', txt))
+        _user_em = {}
+        users_arr = df_filtered['user'].astype(str).values if 'user' in df_filtered.columns else []
+        msgs_arr = df_filtered[mc_em].fillna('').astype(str).values if mc_em in df_filtered.columns else []
+        for u, txt in zip(users_arr, msgs_arr):
+            ems = _emoji_regex.findall(txt)
+            if ems:
+                all_emojis.extend(ems)
+                _user_em[u] = _user_em.get(u, 0) + len(ems)
 
         if all_emojis:
             from collections import Counter as _Ctr
@@ -337,13 +389,6 @@ if "df_cleaned" in st.session_state:
                         Top Emoji Users
                     </div>
                 """, unsafe_allow_html=True)
-                # Per user emoji count
-                _user_em = {}
-                for _, row in df_filtered.iterrows():
-                    u = row['user']
-                    ems = _re_em.findall(r'[🌀-🿿☀-➿]',
-                                         str(row.get(mc_em,'')))
-                    _user_em[u] = _user_em.get(u, 0) + len(ems)
                 top_em_users = sorted(_user_em.items(), key=lambda x: x[1], reverse=True)[:5]
                 medals = ['🥇','🥈','🥉','4️⃣','5️⃣']
                 for idx_eu, (usr, cnt_eu) in enumerate(top_em_users):
@@ -378,7 +423,22 @@ if "df_cleaned" in st.session_state:
             with col1:
                 st.subheader("Processing Time")
                 times = {name: result["metrics"]["processing_time"] for name, result in model_manager.results.items()}
-                st.bar_chart(pd.Series(times))
+                fig_times = go.Figure(go.Bar(
+                    x=list(times.keys()),
+                    y=list(times.values()),
+                    marker_color='#18A3B7',
+                    hovertemplate='%{x}: %{y:.3f}s<extra></extra>',
+                ))
+                fig_times.update_layout(
+                    height=280,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(family='Outfit, sans-serif'),
+                    margin=dict(l=10, r=10, t=10, b=20),
+                    yaxis_title='Seconds',
+                )
+                st.plotly_chart(fig_times, use_container_width=True)
+
             with col2:
                 st.subheader("Model Confidence")
                 st.info("Lower processing time = VADER (rule-based)\nHigher processing time = Transformer (deep learning)")
@@ -703,20 +763,25 @@ if "df_cleaned" in st.session_state:
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── API Key input ─────────────────────────────────────────────────────
-        with st.expander("🔑 Enter API Key", expanded=("ai_api_key" not in st.session_state)):
+        secret_key, secret_prov = get_space_secret_key()
+        has_key = bool(st.session_state.get("ai_api_key")) or bool(secret_key)
+        active_key = st.session_state.get("ai_api_key") or secret_key
+
+        with st.expander("🔑 Enter API Key", expanded=("ai_api_key" not in st.session_state and not secret_key)):
             _exp_tc = '#7A6248' if st.session_state.get('theme','light')=='light' else '#94A3B8'
             st.markdown(
                 f'<div style="font-size:12px;color:{_exp_tc};margin-bottom:10px;">'
                 'Paste your key below — provider is auto-detected from key prefix<br>'
-                '<span style="color:#7C3AED;font-family:monospace;">sk-ant-</span> · '
-                '<span style="color:#059669;font-family:monospace;">AIza</span> · '
-                '<span style="color:#D97706;font-family:monospace;">gsk_</span>'
+                '<span style="color:#D97706;font-family:monospace;">gsk_ (Groq)</span> · '
+                '<span style="color:#059669;font-family:monospace;">AIza (Gemini)</span> · '
+                '<span style="color:#10A37F;font-family:monospace;">sk- (OpenAI)</span> · '
+                '<span style="color:#7C3AED;font-family:monospace;">sk-ant- (Anthropic)</span>'
                 '</div>',
                 unsafe_allow_html=True,
             )
             api_key_input = st.text_input(
                 "API Key", type="password",
-                placeholder="Paste your API key here (sk-ant- / AIza / gsk_)...",
+                placeholder="Paste your API key here (gsk_ / AIza / sk- / sk-ant-)...",
                 label_visibility="collapsed",
                 key="api_key_field",
             )
@@ -735,7 +800,7 @@ if "df_cleaned" in st.session_state:
                     st.markdown(
                         '<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);'
                         'border-radius:8px;padding:8px 12px;font-size:12px;color:#F87171;margin-top:6px;">'
-                        '⚠️ Unknown key format — must start with sk-ant-, AIza, or gsk_</div>',
+                        '⚠️ Unknown key format — must start with gsk_, AIza, sk-, or sk-ant-</div>',
                         unsafe_allow_html=True,
                     )
 
@@ -753,18 +818,15 @@ if "df_cleaned" in st.session_state:
                     st.info("Key cleared.")
 
         # ── Generate ──────────────────────────────────────────────────────────
-        has_key = bool(st.session_state.get("ai_api_key"))
-
         if has_key:
-            active_key      = st.session_state.ai_api_key
             active_provider = detect_provider(active_key)
             prov_info       = PROVIDERS.get(active_provider, {})
-            badge_color     = prov_info.get("badge", "#18A3B7")
             prov_name       = prov_info.get("name", "AI")
+            source_badge    = "Environment Secret" if (not st.session_state.get("ai_api_key") and secret_key) else "User Configured"
             st.markdown(
                 f'<div style="background:rgba(24,163,183,0.06);border:1px solid rgba(24,163,183,0.20);'
                 f'border-radius:8px;padding:8px 14px;font-size:12px;color:#34D399;margin-bottom:12px;'
-                f'display:inline-block;">✅ Ready · {prov_name}</div>',
+                f'display:inline-block;">✅ Ready · {prov_name} ({source_badge})</div>',
                 unsafe_allow_html=True,
             )
 
@@ -796,11 +858,11 @@ if "df_cleaned" in st.session_state:
                 "✨ AI Summary" + (" (API Key Required)" if not has_key else ""),
                 use_container_width=True,
                 disabled=not has_key,
-                help="Add API key first" if not has_key else "Analyze with AI",
+                help="Add API key first or configure Space Secrets" if not has_key else "Analyze with AI",
                 key="gen_ai_summary",
             ):
                 with st.spinner("🤖 AI is reading your chat..."):
-                    result = generate_ai_summary(df_filtered, st.session_state.ai_api_key)
+                    result = generate_ai_summary(df_filtered, active_key)
                     st.session_state.ai_summary_result = result
 
         # ── Result ────────────────────────────────────────────────────────────
@@ -981,27 +1043,32 @@ if "df_cleaned" in st.session_state:
 
             # Top pairs
             st.markdown("#### 🔗 Top Interaction Pairs")
-            df_s  = df_filtered.sort_values("datetime").reset_index(drop=True)
-            from collections import defaultdict
-            pairs = defaultdict(int)
-            for i in range(1, len(df_s)):
-                u1 = df_s.loc[i-1, "user"]; u2 = df_s.loc[i, "user"]
-                dt = (df_s.loc[i, "datetime"] - df_s.loc[i-1, "datetime"]).total_seconds()
-                if u1 != u2 and dt < 300:
-                    pairs[tuple(sorted([u1, u2]))] += 1
-            if pairs:
-                top_pairs = sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:5]
-                for (u1, u2), cnt in top_pairs:
-                    pct = round(cnt / sum(pairs.values()) * 100, 1)
-                    st.markdown(
-                        f'<div style="background:rgba(24,163,183,0.07);border:1px solid rgba(24,163,183,0.18);'
-                        f'border-radius:10px;padding:10px 16px;margin-bottom:8px;display:flex;'
-                        f'justify-content:space-between;align-items:center;">'
-                        f'<span style="color:{_tc("#18120A","#E2E8F0")};font-size:14px;">👤 {u1} &nbsp;↔️&nbsp; {u2}</span>'
-                        f'<span style="color:#18A3B7;font-family:monospace;font-weight:700;">'
-                        f'{cnt} exchanges ({pct}%)</span></div>',
-                        unsafe_allow_html=True,
-                    )
+            if len(df_filtered) > 1 and 'user' in df_filtered.columns and 'datetime' in df_filtered.columns:
+                df_s = df_filtered[['user', 'datetime']].dropna().sort_values("datetime").reset_index(drop=True)
+                if len(df_s) > 1:
+                    u_arr = df_s['user'].astype(str).values
+                    dt_arr = pd.to_datetime(df_s['datetime']).values
+                    dt_diff = (dt_arr[1:] - dt_arr[:-1]) / np.timedelta64(1, 's')
+                    u1_arr = u_arr[:-1]
+                    u2_arr = u_arr[1:]
+                    mask = (u1_arr != u2_arr) & (dt_diff >= 0) & (dt_diff < 300)
+                    from collections import Counter as _Ctr
+                    valid_pairs = [tuple(sorted([a, b])) for a, b in zip(u1_arr[mask], u2_arr[mask])]
+                    pairs = dict(_Ctr(valid_pairs))
+                    if pairs:
+                        total_ex = sum(pairs.values())
+                        top_pairs = sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:5]
+                        for (u1, u2), cnt in top_pairs:
+                            pct = round(cnt / max(total_ex, 1) * 100, 1)
+                            st.markdown(
+                                f'<div style="background:rgba(24,163,183,0.07);border:1px solid rgba(24,163,183,0.18);'
+                                f'border-radius:10px;padding:10px 16px;margin-bottom:8px;display:flex;'
+                                f'justify-content:space-between;align-items:center;">'
+                                f'<span style="color:{_tc("#18120A","#E2E8F0")};font-size:14px;">👤 {u1} &nbsp;↔️&nbsp; {u2}</span>'
+                                f'<span style="color:#18A3B7;font-family:monospace;font-weight:700;">'
+                                f'{cnt} exchanges ({pct}%)</span></div>',
+                                unsafe_allow_html=True,
+                            )
 
         # ── 2. Response Time ──────────────────────────────────────────────
         elif deep_tab == "⏱️ Response Time":
@@ -1756,22 +1823,25 @@ if "df_cleaned" in st.session_state:
 
         # Pre-compute special tables
         mc_ex = 'message_cleaned' if 'message_cleaned' in df_filtered.columns else 'message'
-        user_stats_df = df_filtered.groupby('user').agg(
-            Messages=('user','count'),
-            Avg_Sentiment=('sentiment_compound','mean'),
-            Positive_pct=('sentiment_vader', lambda x:(x=='POSITIVE').sum()/len(x)*100),
-            Negative_pct=('sentiment_vader', lambda x:(x=='NEGATIVE').sum()/len(x)*100),
-            Avg_Msg_Length=('message_length','mean'),
-            Total_Emojis=(mc_ex, lambda x: x.fillna('').str.count(r'[\U0001F300-\U0001FFFF]').sum()),
-        ).round(2).reset_index()
+        agg_kws = {'Messages': ('user', 'count')}
+        if 'sentiment_compound' in df_filtered.columns:
+            agg_kws['Avg_Sentiment'] = ('sentiment_compound', 'mean')
+        if 'sentiment_vader' in df_filtered.columns:
+            agg_kws['Positive_pct'] = ('sentiment_vader', lambda x: (x == 'POSITIVE').sum() / max(len(x), 1) * 100)
+            agg_kws['Negative_pct'] = ('sentiment_vader', lambda x: (x == 'NEGATIVE').sum() / max(len(x), 1) * 100)
+        if 'message_length' in df_filtered.columns:
+            agg_kws['Avg_Msg_Length'] = ('message_length', 'mean')
 
-        daily_df = df_filtered.copy()
-        daily_df['date'] = daily_df['datetime'].dt.date
-        daily_stats = daily_df.groupby('date').agg(
-            Messages=('user','count'),
-            Avg_Sentiment=('sentiment_compound','mean'),
-            Unique_Users=('user','nunique'),
-        ).round(3).reset_index()
+        user_stats_df = df_filtered.groupby('user').agg(**agg_kws).round(2).reset_index() if 'user' in df_filtered.columns else pd.DataFrame()
+
+        daily_stats = pd.DataFrame()
+        if 'datetime' in df_filtered.columns and 'user' in df_filtered.columns:
+            daily_df = df_filtered.copy()
+            daily_df['date'] = pd.to_datetime(daily_df['datetime']).dt.date
+            daily_kws = {'Messages': ('user', 'count'), 'Unique_Users': ('user', 'nunique')}
+            if 'sentiment_compound' in df_filtered.columns:
+                daily_kws['Avg_Sentiment'] = ('sentiment_compound', 'mean')
+            daily_stats = daily_df.groupby('date').agg(**daily_kws).round(3).reset_index()
 
         special_tables = {
             "dl_user_csv":  user_stats_df,

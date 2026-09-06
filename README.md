@@ -1,3 +1,14 @@
+---
+title: WhatsApp AI Analytics & Sentiment Analyzer
+emoji: 💬
+colorFrom: yellow
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # Advanced WhatsApp Sentiment Analyzer
 
 A comprehensive Python application for analyzing WhatsApp conversations with sentiment analysis, emotion detection, and behavioral insights using NLP and machine learning.
@@ -78,10 +89,17 @@ python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk
 ### 5. Run Streamlit App
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run streamlit_app.py --server.port=7860 --server.address=0.0.0.0
 ```
 
-The app will open at `http://localhost:8501`
+The app will open at `http://localhost:7860`.
+
+### 6. Run with Docker (Local Container Test)
+
+```bash
+docker build -t whatsapp-analyzer .
+docker run -p 7860:7860 whatsapp-analyzer
+```
 
 ## How to Export WhatsApp Chat
 

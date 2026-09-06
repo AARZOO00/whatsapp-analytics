@@ -18,6 +18,7 @@ import plotly.express as px
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
 import io
+import re
 
 # ── Shared palette ────────────────────────────────────────────────────────
 _TEAL   = '#18A3B7'
@@ -74,13 +75,20 @@ def build_network_graph(df: pd.DataFrame) -> go.Figure:
     df2 = df.sort_values('datetime').reset_index(drop=True)
     edges = defaultdict(int)
 
-    for i in range(1, len(df2)):
-        u1 = df2.loc[i-1, 'user']
-        u2 = df2.loc[i,   'user']
-        dt = (df2.loc[i, 'datetime'] - df2.loc[i-1, 'datetime']).total_seconds()
-        if u1 != u2 and dt < 300:   # within 5 minutes = likely a reply
-            key = tuple(sorted([u1, u2]))
-            edges[key] += 1
+    users_arr = df2['user'].to_numpy()
+    times_arr = df2['datetime'].to_numpy()
+
+    if len(df2) > 1:
+        # Vectorized time differences in seconds
+        dt_secs = (times_arr[1:] - times_arr[:-1]) / np.timedelta64(1, 's')
+        u1_arr = users_arr[:-1]
+        u2_arr = users_arr[1:]
+
+        for u1, u2, dt in zip(u1_arr, u2_arr, dt_secs):
+            if u1 != u2 and dt < 300:   # within 5 minutes = likely a reply
+                key = tuple(sorted([str(u1), str(u2)]))
+                edges[key] += 1
+
 
     if not edges:
         fig = go.Figure()
@@ -530,11 +538,38 @@ def recap_stat_card(df: pd.DataFrame) -> go.Figure:
 #  6. PDF REPORT EXPORT
 # ══════════════════════════════════════════════════════════════════════════
 
+def _sanitize_pdf_text(text) -> str:
+    """Sanitize text for ReportLab PDF: strip non-latin1/emojis and escape XML entities."""
+    if text is None:
+        return ""
+    s = str(text)
+    # Strip emojis and 4-byte unicode characters
+    s = re.sub(r'[\U00010000-\U0010ffff]', '', s)
+    # Remove control characters
+    s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', s)
+    # XML escape
+    s = s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    # Encode as latin-1 with replace/ignore to prevent ReportLab crash
+    return s.encode('latin-1', 'replace').decode('latin-1')
+
+def _clean_table_text(text, max_len: int = 50) -> str:
+    """Clean plain text for ReportLab Table cells (no XML escaping needed)."""
+    if text is None:
+        return ""
+    s = str(text)
+    s = re.sub(r'[\U00010000-\U0010ffff]', '', s)
+    s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', s)
+    s = s.encode('latin-1', 'replace').decode('latin-1')
+    return s[:max_len]
+
+
 def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
     """
     Generate a professional PDF report using reportlab.
     Returns bytes of the PDF.
     """
+    if df is None or len(df) == 0:
+        return b''
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
@@ -572,14 +607,16 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
 
     # ── Stats ─────────────────────────────────────────────────────────────
     total    = len(df)
-    users    = df['user'].nunique()
-    days     = max((df['datetime'].max() - df['datetime'].min()).days, 1)
-    top_user = df['user'].value_counts().index[0] if total else 'N/A'
-    pos_pct  = round((df['sentiment_vader'] == 'POSITIVE').sum() / max(total,1) * 100, 1)
-    neg_pct  = round((df['sentiment_vader'] == 'NEGATIVE').sum() / max(total,1) * 100, 1)
-    tox_pct  = round((df['is_toxic'] == True).sum() / max(total,1) * 100, 1)
-    date_str = (f"{df['datetime'].min().strftime('%d %b %Y')} – "
-                f"{df['datetime'].max().strftime('%d %b %Y')}")
+    users    = df['user'].nunique() if 'user' in df.columns else 0
+    min_dt   = df['datetime'].min() if 'datetime' in df.columns else None
+    max_dt   = df['datetime'].max() if 'datetime' in df.columns else None
+    days     = max((max_dt - min_dt).days, 1) if pd.notna(min_dt) and pd.notna(max_dt) else 1
+    top_user = df['user'].value_counts().index[0] if total and 'user' in df.columns and len(df['user'].value_counts()) else 'N/A'
+    top_user = _clean_table_text(top_user, 30)
+    pos_pct  = round((df['sentiment_vader'] == 'POSITIVE').sum() / max(total,1) * 100, 1) if 'sentiment_vader' in df.columns else 0.0
+    neg_pct  = round((df['sentiment_vader'] == 'NEGATIVE').sum() / max(total,1) * 100, 1) if 'sentiment_vader' in df.columns else 0.0
+    tox_pct  = round((df['is_toxic'] == True).sum() / max(total,1) * 100, 1) if 'is_toxic' in df.columns else 0.0
+    date_str = (f"{min_dt.strftime('%d %b %Y')} - {max_dt.strftime('%d %b %Y')}") if pd.notna(min_dt) and pd.notna(max_dt) else "N/A"
 
     # ── Page 1: Cover ─────────────────────────────────────────────────────
     story.append(Spacer(1, 1.5*cm))
@@ -587,7 +624,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
     story.append(Paragraph("Conversation Analysis Report", ParagraphStyle(
         'Sub', parent=styles['Normal'], fontSize=14,
         textColor=colors.HexColor('#475569'), spaceAfter=4)))
-    story.append(Paragraph(date_str, caption))
+    story.append(Paragraph(_sanitize_pdf_text(date_str), caption))
     story.append(HRFlowable(width='100%', thickness=2,
                             color=colors.HexColor('#18A3B7'), spaceAfter=16))
 
@@ -626,10 +663,10 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
     story.append(HRFlowable(width='100%', thickness=1,
                             color=colors.HexColor('#E2E8F0'), spaceAfter=8))
     if summary and summary.get('conversation_summary'):
-        story.append(Paragraph(summary['conversation_summary'], body))
+        story.append(Paragraph(_sanitize_pdf_text(summary['conversation_summary']), body))
     if summary and summary.get('detailed_narrative'):
         story.append(Spacer(1, 0.3*cm))
-        story.append(Paragraph(summary['detailed_narrative'], body))
+        story.append(Paragraph(_sanitize_pdf_text(summary['detailed_narrative']), body))
 
     # ── Key Insights ───────────────────────────────────────────────────────
     story.append(Paragraph("Key Insights", h2))
@@ -637,7 +674,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
                             color=colors.HexColor('#E2E8F0'), spaceAfter=8))
     if summary and summary.get('key_insights'):
         for insight in summary['key_insights']:
-            story.append(Paragraph(f"• {insight}", body))
+            story.append(Paragraph(f"• {_sanitize_pdf_text(insight)}", body))
     else:
         story.append(Paragraph("No insights available.", body))
 
@@ -646,19 +683,21 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
     story.append(HRFlowable(width='100%', thickness=1,
                             color=colors.HexColor('#E2E8F0'), spaceAfter=8))
 
-    user_stats = df.groupby('user').agg(
-        Messages=('message', 'count'),
-        Avg_Length=('message_length', 'mean'),
-        Avg_Sentiment=('sentiment_compound', 'mean'),
-    ).round(2).sort_values('Messages', ascending=False).head(20)
+    agg_dict = {'message': 'count'}
+    if 'message_length' in df.columns:
+        agg_dict['message_length'] = 'mean'
+    if 'sentiment_compound' in df.columns:
+        agg_dict['sentiment_compound'] = 'mean'
+
+    user_stats = df.groupby('user').agg(agg_dict).round(2).sort_values('message', ascending=False).head(20)
 
     user_data = [['User', 'Messages', 'Avg Length', 'Avg Sentiment']]
     for user_name, row in user_stats.iterrows():
         user_data.append([
-            str(user_name)[:25],
-            str(int(row['Messages'])),
-            f"{row['Avg_Length']:.1f}",
-            f"{row['Avg_Sentiment']:.2f}",
+            _clean_table_text(user_name, 25),
+            str(int(row['message'])),
+            f"{row.get('message_length', 0):.1f}",
+            f"{row.get('sentiment_compound', 0):.2f}",
         ])
 
     u_tbl = Table(user_data, colWidths=[7*cm, 3.5*cm, 3.5*cm, 3.5*cm])
@@ -683,7 +722,7 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
     story.append(HRFlowable(width='100%', thickness=1,
                             color=colors.HexColor('#E2E8F0'), spaceAfter=8))
     if summary and summary.get('most_discussed_topics'):
-        topics_text = "  •  ".join(summary['most_discussed_topics'][:10])
+        topics_text = "  •  ".join([_sanitize_pdf_text(t) for t in summary['most_discussed_topics'][:10]])
         story.append(Paragraph(topics_text, body))
 
     # ── Mood Analysis ──────────────────────────────────────────────────────
@@ -725,9 +764,13 @@ def generate_pdf_report(df: pd.DataFrame, summary: Dict = None) -> bytes:
         center,
     ))
 
-    doc.build(story)
-    buf.seek(0)
-    return buf.read()
+    try:
+        doc.build(story)
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        print(f"Error generating PDF report: {e}")
+        return b''
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -796,11 +839,15 @@ def emoji_analytics(df: pd.DataFrame) -> tuple:
     all_emojis = []
     user_emojis = {}
 
-    for _, row in df.iterrows():
-        user = row['user']
-        emojis = list(row.get('emojis', []))
-        all_emojis.extend(emojis)
-        user_emojis.setdefault(user, []).extend(emojis)
+    users_arr = df['user'].values if 'user' in df.columns else []
+    emojis_col = df['emojis'].values if 'emojis' in df.columns else [''] * len(df)
+
+    for user, em_str in zip(users_arr, emojis_col):
+        if em_str:
+            em_list = list(em_str)
+            all_emojis.extend(em_list)
+            user_emojis.setdefault(user, []).extend(em_list)
+
 
     if not all_emojis:
         empty = go.Figure()
@@ -1020,27 +1067,23 @@ def reply_chain_analysis(df: pd.DataFrame) -> Tuple[go.Figure, go.Figure, pd.Dat
 
     # Detect replies: "@name" or message within 5 min of prev user
     reply_pairs = []
-    starter_counts = {}
-    last_user = None
-    last_time = None
-    conv_start = True
+    users_arr = df2['user'].values
+    times_arr = df2['datetime'].to_numpy()
 
-    for i, row in df2.iterrows():
-        u    = row['user']
-        t    = row['datetime']
-        msg  = str(row.get(mc, ''))
+    if len(df2) > 0:
+        starter_counts[users_arr[0]] = 1
 
-        # Conversation starter: first message after 30+ min gap
-        if last_time is None or (t - last_time).total_seconds() > 1800:
-            starter_counts[u] = starter_counts.get(u, 0) + 1
+    if len(df2) > 1:
+        diff_secs = (times_arr[1:] - times_arr[:-1]) / np.timedelta64(1, 's')
+        u1_arr = users_arr[:-1]
+        u2_arr = users_arr[1:]
 
-        # Reply pair: different user within 5 min
-        if last_user and last_user != u and last_time:
-            if (t - last_time).total_seconds() < 300:
-                reply_pairs.append((last_user, u))
+        for u1, u2, dt in zip(u1_arr, u2_arr, diff_secs):
+            if dt > 1800:
+                starter_counts[u2] = starter_counts.get(u2, 0) + 1
+            if u1 != u2 and dt < 300:
+                reply_pairs.append((u1, u2))
 
-        last_user = u
-        last_time = t
 
     # ── Reply heatmap ──────────────────────────────────────────────────
     if reply_pairs:
@@ -1102,21 +1145,28 @@ def reply_chain_analysis(df: pd.DataFrame) -> Tuple[go.Figure, go.Figure, pd.Dat
 def best_friends_analysis(df: pd.DataFrame) -> Tuple[go.Figure, pd.DataFrame]:
     """Find most interacting pairs — best friends in the group."""
     from collections import Counter
-    df2  = df.copy().sort_values('datetime').reset_index(drop=True)
-    mc   = 'message_cleaned' if 'message_cleaned' in df.columns else 'message'
-    pairs = []
-    last_user = None
-    last_time = None
+    if df is None or len(df) < 2 or 'datetime' not in df.columns or 'user' not in df.columns:
+        return go.Figure(), pd.DataFrame()
 
-    for _, row in df2.iterrows():
-        u = row['user']
-        t = row['datetime']
-        if last_user and last_user != u and last_time:
-            if (t - last_time).total_seconds() < 600:  # within 10 min
-                key = tuple(sorted([last_user, u]))
-                pairs.append(key)
-        last_user = u
-        last_time = t
+    df2 = df[['user', 'datetime']].dropna().sort_values('datetime').reset_index(drop=True)
+    if len(df2) < 2:
+        return go.Figure(), pd.DataFrame()
+
+    users = df2['user'].astype(str).values
+    dtimes = pd.to_datetime(df2['datetime']).values
+
+    # Vectorized calculation of time differences in seconds
+    diff_secs = (dtimes[1:] - dtimes[:-1]) / np.timedelta64(1, 's')
+    u_prev = users[:-1]
+    u_curr = users[1:]
+
+    # Valid if different users and replied within 10 minutes (600 seconds)
+    valid_mask = (u_prev != u_curr) & (diff_secs >= 0) & (diff_secs < 600)
+
+    p1 = u_prev[valid_mask]
+    p2 = u_curr[valid_mask]
+
+    pairs = [tuple(sorted([a, b])) for a, b in zip(p1, p2)]
 
     if not pairs:
         return go.Figure(), pd.DataFrame()

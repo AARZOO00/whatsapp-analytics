@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Sensitive files & secrets
+.env
+*.env
+*.pem
+*.key
+
+# Local / IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Streamlit local state
+.streamlit/secrets.toml
+
+# Raw user chats / uploads
+whatsapp-analyzer/data/raw/*.txt
+whatsapp-analyzer/data/raw/*.zip
+data/raw/
+*.txt
+!requirements.txt
+
+# Scratch and test data
+scratch/

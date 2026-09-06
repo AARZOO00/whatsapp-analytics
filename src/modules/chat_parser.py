@@ -1,15 +1,56 @@
 import re
 import pandas as pd
 from datetime import datetime
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 
 class WhatsAppParser:
     """
     Parse WhatsApp exported chat files.
-    Handles both individual and group chats.
+    Handles Android, iOS, 12h, 24h, multiline messages, UTF-8/UTF-16/BOM,
+    and system/media messages with high speed and memory efficiency.
     """
 
-    MESSAGE_PATTERN = r'^(\d{1,2}/\d{1,2}/\d{2,4}),?\s+(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)?)\s*-?\s+(.+?):\s+(.*)$'
+    # Comprehensive regex patterns for common WhatsApp export formats:
+    # 1. Standard Android: "DD/MM/YYYY, HH:MM - User: Message" or "MM/DD/YY, HH:MM AM/PM - User: Message"
+    # 2. iOS with brackets: "[DD/MM/YY, HH:MM:SS AM/PM] User: Message"
+    # 3. Hyphenated / dotted dates: "YYYY-MM-DD, HH:MM - User: Message" or "DD.MM.YY, HH:MM - User: Message"
+    PATTERNS = [
+        # iOS format: [DD/MM/YY(YY), HH:MM(:SS) (AM/PM)] User: Message
+        re.compile(r'^\[(\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[apAP][mM])?)\]\s+([^:]+?):\s+(.*)$'),
+        # Standard Android format: DD/MM/YY(YY), HH:MM (AM/PM) - User: Message
+        re.compile(r'^(\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[apAP][mM])?)\s+-\s+([^:]+?):\s+(.*)$'),
+        # System message iOS format: [DD/MM/YY, HH:MM:SS] System text
+        re.compile(r'^\[(\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[apAP][mM])?)\]\s+(.*)$'),
+        # System message Android format: DD/MM/YY, HH:MM - System text
+        re.compile(r'^(\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[apAP][mM])?)\s+-\s+(.*)$'),
+    ]
+
+    _SYSTEM_PHRASES = (
+        'messages and calls are end-to-end encrypted',
+        'created group',
+        'added',
+        'removed',
+        'left',
+        'changed the subject',
+        'changed this group',
+        'changed the group',
+        'security code changed',
+        'you were added',
+        'this message was deleted',
+        'deleted this message',
+    )
+
+    _MEDIA_PHRASES = (
+        '<media omitted>',
+        '(file attached)',
+        'image omitted',
+        'video omitted',
+        'audio omitted',
+        'document omitted',
+        'sticker omitted',
+        'contact card omitted',
+        'location:',
+    )
 
     def __init__(self):
         self.messages = []
@@ -18,68 +59,127 @@ class WhatsAppParser:
     def parse_file(self, file_path: str) -> pd.DataFrame:
         """
         Parse WhatsApp chat file and return DataFrame.
-
-        Args:
-            file_path: Path to WhatsApp exported .txt file
-
-        Returns:
-            DataFrame with columns: datetime, user, message, is_media, is_system
+        Memory-efficient line streaming with multiline message preservation.
         """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-        except UnicodeDecodeError:
-            with open(file_path, 'r', encoding='latin-1') as file:
-                lines = file.readlines()
+        encodings = ['utf-8-sig', 'utf-8', 'utf-16', 'latin-1', 'cp1252']
+        lines = None
+
+        for enc in encodings:
+            try:
+                with open(file_path, 'r', encoding=enc, errors='replace') as file:
+                    lines = file.readlines()
+                if lines and len(lines) > 0:
+                    break
+            except Exception:
+                continue
+
+        if not lines:
+            return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
 
         self.messages = []
+        self.errors = []
+        current_msg = None
 
-        for line_num, line in enumerate(lines):
-            line = line.strip()
-
+        # Clean zero-width / non-breaking space characters common in WhatsApp exports
+        for line_num, raw_line in enumerate(lines):
+            # Normalize hidden unicode characters (e.g. LTR marks, narrow no-break space)
+            line = raw_line.replace('\u202f', ' ').replace('\xa0', ' ').replace('\u200e', '').replace('\u200f', '').strip('\r\n')
             if not line:
                 continue
 
-            parsed = self._parse_line(line)
+            parsed, is_system_line = self._parse_line_with_mode(line)
+
             if parsed:
-                self.messages.append(parsed)
+                if current_msg:
+                    self.messages.append(current_msg)
+                current_msg = parsed
             else:
-                self.errors.append({
-                    'line_num': line_num + 1,
-                    'line': line,
-                    'reason': 'Could not parse line'
-                })
+                # If it didn't match a new timestamp, it's either a multiline continuation or unparseable
+                if current_msg and not current_msg.get('is_system', False):
+                    # Append multiline text to previous message
+                    current_msg['message'] += '\n' + line.strip()
+                else:
+                    self.errors.append({
+                        'line_num': line_num + 1,
+                        'line': line,
+                        'reason': 'Could not parse line'
+                    })
+
+        if current_msg:
+            self.messages.append(current_msg)
+
+        if not self.messages:
+            return pd.DataFrame(columns=['datetime', 'user', 'message', 'is_media', 'is_system'])
 
         df = pd.DataFrame(self.messages)
 
-        df['datetime'] = pd.to_datetime(df['datetime'])
+        # Fast datetime conversion with format='mixed' and fallback
+        try:
+            df['datetime'] = pd.to_datetime(df['datetime'], format='mixed', errors='coerce')
+        except Exception:
+            df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+
+        # Fill any unparseable datetimes with forward-fill then backward-fill
+        if df['datetime'].isna().any():
+            df['datetime'] = df['datetime'].ffill().bfill()
+            if df['datetime'].isna().any():
+                df['datetime'] = df['datetime'].fillna(pd.Timestamp.now())
 
         return df
 
-    def _parse_line(self, line: str) -> Dict:
+    def _parse_line_with_mode(self, line: str) -> Tuple[Optional[Dict], bool]:
         """
-        Parse a single line from WhatsApp chat.
-
-        Returns:
-            Dict with parsed data or None if line doesn't match pattern
+        Attempt to match line against known message & system patterns.
         """
-        match = re.match(self.MESSAGE_PATTERN, line)
+        # 1. User message pattern (iOS)
+        m = self.PATTERNS[0].match(line)
+        if m:
+            date_str, time_str, user, message = m.groups()
+            return self._build_record(date_str, time_str, user, message, is_system=False), False
 
-        if not match:
-            return None
+        # 2. User message pattern (Android)
+        m = self.PATTERNS[1].match(line)
+        if m:
+            date_str, time_str, user, message = m.groups()
+            return self._build_record(date_str, time_str, user, message, is_system=False), False
 
-        date_str, time_str, user, message = match.groups()
+        # 3. System message pattern (iOS brackets)
+        m = self.PATTERNS[2].match(line)
+        if m:
+            date_str, time_str, system_msg = m.groups()
+            low = system_msg.lower()
+            if any(p in low for p in self._SYSTEM_PHRASES):
+                return self._build_record(date_str, time_str, 'System', system_msg, is_system=True), True
 
-        is_system = user.lower() in ['system message', 'messages and calls are encrypted']
+        # 4. System message pattern (Android)
+        m = self.PATTERNS[3].match(line)
+        if m:
+            date_str, time_str, system_msg = m.groups()
+            low = system_msg.lower()
+            if any(p in low for p in self._SYSTEM_PHRASES):
+                return self._build_record(date_str, time_str, 'System', system_msg, is_system=True), True
 
-        is_media = '<media omitted>' in message.lower()
+        return None, False
 
-        datetime_str = f"{date_str} {time_str}"
+    def _build_record(self, date_str: str, time_str: str, user: str, message: str, is_system: bool) -> Dict:
+        """Build standardized parsed record dictionary."""
+        u_clean = user.strip()
+        msg_clean = message.strip()
+        low_msg = msg_clean.lower()
+
+        # Extra system checks on sender name
+        if not is_system and u_clean.lower() in ('system message', 'system', 'whatsapp'):
+            is_system = True
+
+        if not is_system and any(p in low_msg for p in self._SYSTEM_PHRASES):
+            is_system = True
+
+        is_media = any(p in low_msg for p in self._MEDIA_PHRASES)
 
         return {
-            'datetime': datetime_str,
-            'user': user.strip(),
-            'message': message.strip(),
+            'datetime': f"{date_str.strip()} {time_str.strip()}",
+            'user': u_clean,
+            'message': msg_clean,
             'is_media': is_media,
             'is_system': is_system
         }
@@ -92,7 +192,8 @@ class WhatsAppParser:
         """Get parsing summary statistics"""
         return {
             'total_lines': len(self.messages),
-            'system_messages': sum(1 for m in self.messages if m['is_system']),
-            'media_messages': sum(1 for m in self.messages if m['is_media']),
-            'unique_users': len(set(m['user'] for m in self.messages if not m['is_system']))
+            'system_messages': sum(1 for m in self.messages if m.get('is_system', False)),
+            'media_messages': sum(1 for m in self.messages if m.get('is_media', False)),
+            'unique_users': len(set(m['user'] for m in self.messages if not m.get('is_system', False)))
         }
+

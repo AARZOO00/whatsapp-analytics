@@ -4,22 +4,24 @@ Supports: Anthropic Claude · Google Gemini · Groq (Llama)
 Place in: whatsapp-analyzer/analytics/ai_summary.py
 """
 import json
-from typing import Dict, List
+import os
+from typing import Dict, List, Tuple, Optional
 import pandas as pd
 
 MAX_SAMPLE_MESSAGES = 120
 
 # ── Provider configs ──────────────────────────────────────────────────────
 PROVIDERS = {
-    "anthropic": {
-        "name":        "🤖 Anthropic Claude",
-        "url":         "https://api.anthropic.com/v1/messages",
-        "model":       "claude-sonnet-4-20250514",
-        "free":        False,
-        "key_hint":    "sk-ant-",
-        "key_example": "sk-ant-api03-...",
-        "signup_url":  "https://console.anthropic.com",
-        "badge":       "#7C3AED",
+    "groq": {
+        "name":        "⚡ Groq (Llama 3)",
+        "url":         "https://api.groq.com/openai/v1/chat/completions",
+        "model":       "llama3-70b-8192",
+        "free":        True,
+        "key_hint":    "gsk_",
+        "key_example": "gsk_...",
+        "signup_url":  "https://console.groq.com",
+        "badge":       "#D97706",
+        "env_var":     "GROQ_API_KEY",
     },
     "gemini": {
         "name":        "✨ Google Gemini",
@@ -30,27 +32,57 @@ PROVIDERS = {
         "key_example": "AIzaSy...",
         "signup_url":  "https://aistudio.google.com/app/apikey",
         "badge":       "#059669",
+        "env_var":     "GEMINI_API_KEY",
     },
-    "groq": {
-        "name":        "⚡ Groq (Llama 3)",
-        "url":         "https://api.groq.com/openai/v1/chat/completions",
-        "model":       "llama3-70b-8192",
-        "free":        True,
-        "key_hint":    "gsk_",
-        "key_example": "gsk_...",
-        "signup_url":  "https://console.groq.com",
-        "badge":       "#D97706",
+    "openai": {
+        "name":        "🧠 OpenAI (GPT-4o Mini)",
+        "url":         "https://api.openai.com/v1/chat/completions",
+        "model":       "gpt-4o-mini",
+        "free":        False,
+        "key_hint":    "sk-",
+        "key_example": "sk-proj-...",
+        "signup_url":  "https://platform.openai.com/api-keys",
+        "badge":       "#10A37F",
+        "env_var":     "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        "name":        "🤖 Anthropic Claude",
+        "url":         "https://api.anthropic.com/v1/messages",
+        "model":       "claude-sonnet-4-20250514",
+        "free":        False,
+        "key_hint":    "sk-ant-",
+        "key_example": "sk-ant-api03-...",
+        "signup_url":  "https://console.anthropic.com",
+        "badge":       "#7C3AED",
+        "env_var":     "ANTHROPIC_API_KEY",
     },
 }
 
 
 def detect_provider(api_key: str) -> str:
     """Auto-detect which provider the key belongs to."""
+    if not api_key:
+        return "unknown"
     key = api_key.strip()
     if key.startswith("sk-ant-"):  return "anthropic"
     if key.startswith("AIza"):     return "gemini"
     if key.startswith("gsk_"):     return "groq"
+    if key.startswith("sk-"):      return "openai"
     return "unknown"
+
+
+def get_space_secret_key() -> Tuple[Optional[str], Optional[str]]:
+    """
+    Check environment variables / Hugging Face Space Secrets for available AI API keys.
+    Returns: (api_key, provider_name) or (None, None)
+    """
+    for provider, config in PROVIDERS.items():
+        env_var = config.get("env_var")
+        if env_var and os.environ.get(env_var):
+            val = os.environ[env_var].strip()
+            if val:
+                return val, provider
+    return None, None
 
 
 # ── Prompt builder ────────────────────────────────────────────────────────
@@ -226,11 +258,33 @@ def _call_groq(api_key: str, prompt: str) -> str:
         return data['choices'][0]['message']['content']
 
 
+def _call_openai(api_key: str, prompt: str) -> str:
+    import urllib.request, urllib.error
+    payload = json.dumps({
+        "model":       "gpt-4o-mini",
+        "messages":    [{"role": "user", "content": prompt}],
+        "max_tokens":  1200,
+        "temperature": 0.7,
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {api_key.strip()}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=40) as resp:
+        data = json.loads(resp.read().decode('utf-8'))
+        return data['choices'][0]['message']['content']
+
+
 # ── Main entry point ──────────────────────────────────────────────────────
 
-def generate_ai_summary(df: pd.DataFrame, api_key: str) -> Dict:
+def generate_ai_summary(df: pd.DataFrame, api_key: str = None) -> Dict:
     """
-    Auto-detect provider from key prefix and generate summary.
+    Auto-detect provider from key prefix or Hugging Face Space secrets, and generate summary.
     Returns: {success, summary, error, stats, provider}
     """
     import urllib.error
@@ -239,20 +293,37 @@ def generate_ai_summary(df: pd.DataFrame, api_key: str) -> Dict:
         return {'success': False, 'error': 'No messages to analyze.', 'summary': '', 'stats': {}, 'provider': ''}
 
     key = api_key.strip() if api_key else ''
-    if not key:
-        return {'success': False, 'error': 'Please enter an API key.', 'summary': '', 'stats': {}, 'provider': ''}
-
     provider = detect_provider(key)
+
+    # Fallback to Space secrets if no key provided
+    if not key or provider == 'unknown':
+        secret_key, secret_prov = get_space_secret_key()
+        if secret_key:
+            key = secret_key
+            provider = secret_prov
+
+    if not key:
+        return {
+            'success': False,
+            'error': 'Please enter an API key or configure Space Secrets (GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).',
+            'summary': '', 'stats': {}, 'provider': ''
+        }
+
     if provider == 'unknown':
         return {
             'success': False,
-            'error':   'Unknown API key format. Keys should start with sk-ant- (Anthropic), AIza (Gemini), or gsk_ (Groq).',
+            'error':   'Unknown API key format. Supported keys: Groq (gsk_...), Gemini (AIza...), OpenAI (sk-...), Anthropic (sk-ant-...).',
             'summary': '', 'stats': {}, 'provider': '',
         }
 
     stats  = _extract_stats(df)
     prompt = _build_prompt(df, stats)
-    callers = {'anthropic': _call_anthropic, 'gemini': _call_gemini, 'groq': _call_groq}
+    callers = {
+        'anthropic': _call_anthropic,
+        'gemini':    _call_gemini,
+        'groq':      _call_groq,
+        'openai':    _call_openai,
+    }
 
     try:
         text = callers[provider](key, prompt)
@@ -265,7 +336,15 @@ def generate_ai_summary(df: pd.DataFrame, api_key: str) -> Dict:
             msg = msg.get('message', body) if isinstance(msg, dict) else str(msg)
         except Exception:
             msg = body[:300]
-        return {'success': False, 'error': f"API error {e.code}: {msg}",
+        if e.code == 429:
+            err_msg = f"Rate limit / quota exceeded ({provider.title()}). Please try again shortly or use another provider."
+        elif e.code == 401:
+            err_msg = f"Invalid API key for {provider.title()}. Please verify your key."
+        else:
+            err_msg = f"API error {e.code}: {msg}"
+        return {'success': False, 'error': err_msg, 'summary': '', 'stats': stats, 'provider': provider}
+    except urllib.error.URLError as e:
+        return {'success': False, 'error': f"Network connection error to {provider.title()}: {e.reason}",
                 'summary': '', 'stats': stats, 'provider': provider}
     except Exception as ex:
         return {'success': False, 'error': str(ex),

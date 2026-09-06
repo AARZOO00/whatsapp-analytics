@@ -114,6 +114,16 @@ class ExportHandler:
             spaceBefore=12
         )
 
+        import re
+
+        def _clean(val, max_len=100):
+            if val is None:
+                return ""
+            s = str(val)
+            s = re.sub(r'[\U00010000-\U0010ffff]', '', s)
+            s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', s)
+            return s.encode('latin-1', 'replace').decode('latin-1')[:max_len]
+
         elements.append(Paragraph("WhatsApp Sentiment Analysis Report", title_style))
         elements.append(Spacer(1, 0.3*inch))
 
@@ -124,11 +134,11 @@ class ExportHandler:
 
         overview_data = [
             ['Metric', 'Value'],
-            ['Total Messages', str(analytics_summary.get('total_messages', 'N/A'))],
-            ['Unique Users', str(analytics_summary.get('unique_users', 'N/A'))],
-            ['Date Range', f"{analytics_summary.get('date_range_start', 'N/A')} to {analytics_summary.get('date_range_end', 'N/A')}"],
-            ['Avg Messages/Day', f"{analytics_summary.get('avg_messages_per_day', 0):.2f}"],
-            ['Most Active User', str(analytics_summary.get('most_active_user', 'N/A'))],
+            ['Total Messages', _clean(analytics_summary.get('total_messages', 'N/A'))],
+            ['Unique Users', _clean(analytics_summary.get('unique_users', 'N/A'))],
+            ['Date Range', f"{_clean(analytics_summary.get('date_range_start', 'N/A'), 20)} to {_clean(analytics_summary.get('date_range_end', 'N/A'), 20)}"],
+            ['Avg Messages/Day', f"{float(analytics_summary.get('avg_messages_per_day', 0) or 0):.2f}"],
+            ['Most Active User', _clean(analytics_summary.get('most_active_user', 'N/A'), 30)],
         ]
 
         overview_table = Table(overview_data, colWidths=[3*inch, 3*inch])

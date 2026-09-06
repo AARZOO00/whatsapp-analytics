@@ -385,14 +385,62 @@ class ChatExplorer:
 
     def render_user_stats(self):
         st.subheader("👥 User Statistics")
+        if self.df.empty or 'user' not in self.df.columns:
+            st.info("No user data available.")
+            return
+
+        import plotly.graph_objects as go
+        is_lt = _is_light()
+        txt_c = '#18120A' if is_lt else '#E2E8F0'
+        grid_c = 'rgba(0,0,0,0.06)' if is_lt else 'rgba(255,255,255,0.06)'
+        bar_c1 = '#B8883A' if is_lt else '#18A3B7'
+        bar_c2 = '#2D8C6B' if is_lt else '#00C896'
+
         stats = self.df.groupby('user').agg(
-            Messages=('message','count'),
-            Avg_Length=('message_length','mean'),
-            Avg_Sentiment=('sentiment_compound','mean'),
-        ).round(2).sort_values('Messages',ascending=False)
-        c1,c2 = st.columns(2)
+            Messages=('message', 'count'),
+            Avg_Length=('message_length', 'mean'),
+            Avg_Sentiment=('sentiment_compound', 'mean'),
+        ).round(2).sort_values('Messages', ascending=False)
+
+        top_stats = stats.head(15)
+
+        c1, c2 = st.columns(2)
         with c1:
-            st.write("**Message Distribution**"); st.bar_chart(stats['Messages'])
+            st.write("**Message Distribution**")
+            fig1 = go.Figure(go.Bar(
+                x=top_stats.index.tolist(),
+                y=top_stats['Messages'].fillna(0).tolist(),
+                marker_color=bar_c1,
+                hovertemplate='%{x}: %{y} messages<extra></extra>',
+            ))
+            fig1.update_layout(
+                height=300,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=txt_c, family='Outfit, sans-serif'),
+                margin=dict(l=10, r=10, t=10, b=30),
+                xaxis=dict(tickangle=-30, gridcolor=grid_c),
+                yaxis=dict(gridcolor=grid_c),
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+
         with c2:
-            st.write("**Avg Sentiment**"); st.bar_chart(stats['Avg_Sentiment'])
+            st.write("**Avg Sentiment**")
+            fig2 = go.Figure(go.Bar(
+                x=top_stats.index.tolist(),
+                y=top_stats['Avg_Sentiment'].fillna(0).tolist(),
+                marker_color=bar_c2,
+                hovertemplate='%{x}: %{y:.2f}<extra></extra>',
+            ))
+            fig2.update_layout(
+                height=300,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=txt_c, family='Outfit, sans-serif'),
+                margin=dict(l=10, r=10, t=10, b=30),
+                xaxis=dict(tickangle=-30, gridcolor=grid_c),
+                yaxis=dict(gridcolor=grid_c, range=[-1, 1]),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
         st.dataframe(stats, use_container_width=True)

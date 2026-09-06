@@ -1,6 +1,21 @@
 [theme]
 base = "light"
+primaryColor = "#B8883A"
 backgroundColor = "#FDFAF4"
 secondaryBackgroundColor = "#FFF8ED"
 textColor = "#18120A"
 font = "sans serif"
+
+[client]
+showErrorDetails = true
+
+[server]
+port = 7860
+address = "0.0.0.0"
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+maxUploadSize = 500
+
+[browser]
+gatherUsageStats = false
