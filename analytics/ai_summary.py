@@ -73,9 +73,22 @@ def detect_provider(api_key: str) -> str:
 
 def get_space_secret_key() -> Tuple[Optional[str], Optional[str]]:
     """
-    Check environment variables / Hugging Face Space Secrets for available AI API keys.
+    Check Streamlit Secrets (st.secrets) or environment variables for available AI API keys.
     Returns: (api_key, provider_name) or (None, None)
     """
+    # 1. Check Streamlit Secrets (Streamlit Community Cloud standard)
+    try:
+        import streamlit as st
+        for provider, config in PROVIDERS.items():
+            env_var = config.get("env_var")
+            if env_var and env_var in st.secrets:
+                val = str(st.secrets[env_var]).strip()
+                if val:
+                    return val, provider
+    except Exception:
+        pass
+
+    # 2. Check OS Environment Variables
     for provider, config in PROVIDERS.items():
         env_var = config.get("env_var")
         if env_var and os.environ.get(env_var):

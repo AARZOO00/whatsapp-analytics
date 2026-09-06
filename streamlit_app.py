@@ -41,6 +41,32 @@ from utils_dash.export_advanced import AdvancedExportSystem
 from src.utils.file_handler import save_uploaded_file
 
 
+@st.cache_resource(show_spinner=False)
+def _ensure_nltk_setup():
+    """Ensure required NLTK resources are safely available on cold start in Streamlit Community Cloud."""
+    try:
+        import nltk
+        resources = [
+            ("tokenizers/punkt", "punkt"),
+            ("tokenizers/punkt_tab", "punkt_tab"),
+            ("corpora/stopwords", "stopwords"),
+            ("corpora/wordnet", "wordnet"),
+            ("taggers/averaged_perceptron_tagger", "averaged_perceptron_tagger"),
+            ("sentiment/vader_lexicon", "vader_lexicon"),
+        ]
+        for path, name in resources:
+            try:
+                nltk.data.find(path)
+            except Exception:
+                try:
+                    nltk.download(name, quiet=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+_ensure_nltk_setup()
+
 def _card(light_bg="#FFFFFF", light_bdr="rgba(184,136,58,0.22)",
           dark_bg="rgba(17,24,39,0.75)", dark_bdr="rgba(24,163,183,0.14)"):
     """Return theme-appropriate card background and border."""
